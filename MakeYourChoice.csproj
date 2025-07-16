@@ -3,23 +3,24 @@
         <!-- target .NET 6 on Windows with WinForms -->
         <TargetFramework>net6.0-windows</TargetFramework>
         <UseWindowsForms>true</UseWindowsForms>
-
-        <!-- explicitly make this a WinForms EXE -->
         <OutputType>WinExe</OutputType>
-        <!-- allow building Windows targets on macOS -->
         <EnableWindowsTargeting>true</EnableWindowsTargeting>
 
-        <!-- single-file, self-contained publish -->
+        <!-- core single-file settings -->
         <PublishSingleFile>true</PublishSingleFile>
         <SelfContained>true</SelfContained>
         <RuntimeIdentifier>win-x64</RuntimeIdentifier>
 
-        <!-- auto-elevation -->
-        <ApplicationManifest>app.manifest</ApplicationManifest>
+        <!-- bundle native runtime bits inside the EXE -->
+        <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+        <!-- bundle _all_ content for self-extract at runtime -->
+        <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
 
-        <!-- icon -->
+        <!-- auto-elevation and icon  -->
+        <ApplicationManifest>app.manifest</ApplicationManifest>
         <ApplicationIcon>icon.ico</ApplicationIcon>
     </PropertyGroup>
+
     <ItemGroup>
         <Content Include="icon.ico">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
