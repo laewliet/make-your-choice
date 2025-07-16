@@ -14,7 +14,15 @@
         <SelfContained>true</SelfContained>
         <RuntimeIdentifier>win-x64</RuntimeIdentifier>
 
-        <!-- if you want auto-elevation -->
+        <!-- auto-elevation -->
         <ApplicationManifest>app.manifest</ApplicationManifest>
+
+        <!-- icon -->
+        <ApplicationIcon>icon.ico</ApplicationIcon>
     </PropertyGroup>
+    <ItemGroup>
+        <Content Include="icon.ico">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </Content>
+    </ItemGroup>
 </Project>
