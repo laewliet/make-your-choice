@@ -6,6 +6,10 @@ using System.IO;
 using System.Net.NetworkInformation;
 using System.Text;
 using System.Windows.Forms;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text.Json.Serialization;
+using System.Threading.Tasks;
 
 namespace MakeYourChoice
 {
@@ -15,6 +19,9 @@ namespace MakeYourChoice
         private const string RepoUrl    = "https://codeberg.org/ky/make-your-choice";
         private const string WebsiteUrl = "https://kurocat.net";
         private const string DiscordUrl = "https://discord.gg/gnvtATeVc4";
+        private const string CurrentVersion = "0.6.4";
+        private const string Owner = "ky";
+        private const string Repo  = "make-your-choice";
 
         private readonly Dictionary<string, string[]> _regions = new()
         {
@@ -77,6 +84,9 @@ namespace MakeYourChoice
             var mSource = new ToolStripMenuItem("Source");
             var miRepo  = new ToolStripMenuItem("Repository");
             miRepo.Click += (_,__) => OpenUrl(RepoUrl);
+            var miCheck  = new ToolStripMenuItem("Check for updates");
+            miCheck.Click += async (_,__) => await CheckForUpdatesAsync();
+            mSource.DropDownItems.Add(miCheck);
             mSource.DropDownItems.Add(miRepo);
 
             var mHelp     = new ToolStripMenuItem("Help");
@@ -169,6 +179,61 @@ namespace MakeYourChoice
             Controls.Add(tlp);
         }
 
+        private async Task CheckForUpdatesAsync()
+        {
+            try
+            {
+                using var client = new HttpClient();
+                // fetch all releases
+                var url = $"https://codeberg.org/api/v1/repos/{Owner}/{Repo}/releases";
+                var releases = await client.GetFromJsonAsync<List<Release>>(url);
+                if (releases == null || releases.Count == 0)
+                {
+                    MessageBox.Show("No releases found.", "Check For Updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                // assume first is latest (API returns newest first)
+                var latest = releases[0].TagName;
+                if (string.Equals(latest, CurrentVersion, StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show(
+                        "You're already using the latest release! :D",
+                        "Check For Updates",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information
+                    );
+                }
+                else
+                {
+                    var resp = MessageBox.Show(
+                        $"A new version is available: {latest}.\nWould you like to update?",
+                        "Update Available",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question
+                    );
+                    if (resp == DialogResult.Yes)
+                        OpenUrl($"https://codeberg.org/{Owner}/{Repo}/releases");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Error while checking for updates:\n" + ex.Message,
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+            }
+        }
+
+        // helper DTO for JSON deserialization
+        private class Release
+        {
+            [JsonPropertyName("tag_name")]
+            public string TagName { get; set; }
+        }
+
         private void StartPingTimer()
         {
             var pinger = new Ping();
@@ -191,7 +256,7 @@ namespace MakeYourChoice
                     _lv.Invoke((Action)(() =>
                     {
                         var sub = item.SubItems[1];
-                        sub.Text      = ms >= 0 ? $"{ms} ms" : "blocked";
+                        sub.Text      = ms >= 0 ? $"{ms} ms" : "disconnected";
                         sub.ForeColor = GetColorForLatency(ms);
                     }));
                 }
@@ -378,7 +443,7 @@ namespace MakeYourChoice
 
             var lblVersion = new Label
             {
-                Text     = "Version 0.6.3\nWindows 7 Service Pack 1 or higher.",
+                Text     = $"Version {CurrentVersion}\nWindows 7 Service Pack 1 or higher.",
                 Font     = new Font(Font.FontFamily, 8, FontStyle.Italic),
                 AutoSize = true,
                 Location = new Point(10, lblDeveloper.Bottom + 10)
