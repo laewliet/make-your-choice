@@ -646,7 +646,7 @@ namespace MakeYourChoice
                 Text            = "Program Settings",
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 StartPosition   = FormStartPosition.CenterParent,
-                ClientSize      = new Size(350, 215),
+                ClientSize      = new Size(350, 225),
                 MaximizeBox     = false,
                 MinimizeBox     = false,
                 ShowInTaskbar   = false,
