@@ -19,7 +19,7 @@ namespace MakeYourChoice
         private const string RepoUrl    = "https://codeberg.org/ky/make-your-choice";
         private const string WebsiteUrl = "https://kurocat.net";
         private const string DiscordUrl = "https://discord.gg/gnvtATeVc4";
-        private const string CurrentVersion = "0.6.4";
+        private const string CurrentVersion = "0.6.5";
         private const string Owner = "ky";
         private const string Repo  = "make-your-choice";
 
@@ -65,6 +65,7 @@ namespace MakeYourChoice
             InitializeComponent();
             this.Icon = new Icon(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.ico"));
             StartPingTimer();
+            CheckForUpdatesAsync(true);
         }
 
         private void InitializeComponent()
@@ -81,11 +82,11 @@ namespace MakeYourChoice
 
             // ── MenuStrip ────────────────────────────────────────────────
             _menuStrip = new MenuStrip();
-            var mSource = new ToolStripMenuItem("Source");
+            var mSource = new ToolStripMenuItem($"v{CurrentVersion}");
             var miRepo  = new ToolStripMenuItem("Repository");
             miRepo.Click += (_,__) => OpenUrl(RepoUrl);
             var miCheck  = new ToolStripMenuItem("Check for updates");
-            miCheck.Click += async (_,__) => await CheckForUpdatesAsync();
+            miCheck.Click += async (_,__) => await CheckForUpdatesAsync(false);
             mSource.DropDownItems.Add(miCheck);
             mSource.DropDownItems.Add(miRepo);
 
@@ -179,7 +180,7 @@ namespace MakeYourChoice
             Controls.Add(tlp);
         }
 
-        private async Task CheckForUpdatesAsync()
+        private async Task CheckForUpdatesAsync(bool silent)
         {
             try
             {
@@ -197,12 +198,15 @@ namespace MakeYourChoice
                 var latest = releases[0].TagName;
                 if (string.Equals(latest, CurrentVersion, StringComparison.OrdinalIgnoreCase))
                 {
-                    MessageBox.Show(
-                        "You're already using the latest release! :D",
-                        "Check For Updates",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information
-                    );
+                    if (!silent)
+                    {
+                        MessageBox.Show(
+                            "You're already using the latest release! :D",
+                            "Check For Updates",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information
+                        );
+                    }
                 }
                 else
                 {
