@@ -13,7 +13,13 @@ The program is available for free on the [Releases tab](https://codeberg.org/ky/
 - Windows 10
 - Windows 11
 
-Steam Deck is unsupported because SteamOS doesn't use a hosts file in the same way Windows does. Therefore this method wouldn't function.
+Steam Deck is unsupported because SteamOS doesn't use a hosts file in the same way Windows does. Therefore, this method wouldn't function.
+
+# UAC Popup & SmartScreen Alert
+The application needs to be run with [administrator permissions](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/user-account-control/) to ensure the hosts file can be edited. Since I don't want to pay Microsoft a fee for getting this free application signed, you will be met with a prompt to trust the unknown developer.
+
+The UAC Popup appears on Windows Vista and newer.  
+The SmartScreen Alert only appears on Windows 8 and newer.  
 
 
 # Repository
