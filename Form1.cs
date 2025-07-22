@@ -21,7 +21,7 @@ namespace MakeYourChoice
         private const string RepoUrl    = "https://codeberg.org/ky/make-your-choice";
         private const string WebsiteUrl = "https://kurocat.net";
         private const string DiscordUrl = "https://discord.gg/gnvtATeVc4";
-        private const string CurrentVersion = "0.7.0";
+        private const string CurrentVersion = "0.7.1";
         private const string Developer = "ky";
         private const string Repo  = "make-your-choice";
 
@@ -154,9 +154,21 @@ namespace MakeYourChoice
             miAbout.Click += (_,__) => ShowAboutDialog();
             var miCheck  = new ToolStripMenuItem("Check for updates");
             miCheck.Click += async (_,__) => await CheckForUpdatesAsync(false);
+            var miOpenHostsFolder = new ToolStripMenuItem("Open Hosts Folder");
+            miOpenHostsFolder.Click += (_, __) =>
+            {
+                var hostsFolder = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.System),
+                    "drivers\\etc");
+                Process.Start(new ProcessStartInfo("explorer.exe", hostsFolder)
+                {
+                    UseShellExecute = true
+                });
+            };
             mSource.DropDownItems.Add(miCheck);
             mSource.DropDownItems.Add(miRepo);
             mSource.DropDownItems.Add(miAbout);
+            mSource.DropDownItems.Add(miOpenHostsFolder);
 
             var mOptions = new ToolStripMenuItem("Options");
             var miSettings = new ToolStripMenuItem("Program settings");
@@ -359,6 +371,35 @@ namespace MakeYourChoice
 
         private void BtnApply_Click(object sender, EventArgs e)
         {
+            // Clear hosts file before applying changes
+            var initialHostsPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.System),
+                "drivers\\etc\\hosts");
+            try
+            {
+                File.WriteAllText(initialHostsPath, string.Empty);
+            }
+            catch
+            {
+                // ignore errors clearing hosts file
+            }
+            // Flush DNS cache before proceeding (clear any cached lookups so hosts file emptiness takes effect)
+            try
+            {
+                var flushInfo = new ProcessStartInfo("ipconfig", "/flushdns")
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false
+                };
+                using (var flushProc = Process.Start(flushInfo))
+                {
+                    flushProc.WaitForExit();
+                }
+            }
+            catch
+            {
+                // ignore DNS flush errors
+            }
             // if universal redirect mode, redirect all endpoints to selected region's IPs
             if (_applyMode == ApplyMode.UniversalRedirect)
             {
@@ -424,8 +465,25 @@ namespace MakeYourChoice
                     }
 
                     File.WriteAllText(hostsPath, sb.ToString());
+                    // Flush DNS cache after writing hosts file (force OS to reload new entries)
+                    try
+                    {
+                        var psi = new ProcessStartInfo("ipconfig", "/flushdns")
+                        {
+                            CreateNoWindow = true,
+                            UseShellExecute = false
+                        };
+                        using (var proc = Process.Start(psi))
+                        {
+                            proc.WaitForExit();
+                        }
+                    }
+                    catch
+                    {
+                        // ignore DNS flush errors
+                    }
                     MessageBox.Show(
-                        "Hosts file updated successfully!",
+                        "Hosts file updated successfully!\nDNS cache flushed.",
                         "Success",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
@@ -492,8 +550,25 @@ namespace MakeYourChoice
                 }
 
                 File.WriteAllText(hostsPath, sb.ToString());
+                // Flush DNS cache after writing hosts file (force OS to reload new entries)
+                try
+                {
+                    var psi = new ProcessStartInfo("ipconfig", "/flushdns")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    using (var proc = Process.Start(psi))
+                    {
+                        proc.WaitForExit();
+                    }
+                }
+                catch
+                {
+                    // ignore DNS flush errors
+                }
                 MessageBox.Show(
-                    "Hosts file updated successfully!",
+                    "Hosts file updated successfully!\nDNS cache flushed.",
                     "Success",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -646,7 +721,7 @@ namespace MakeYourChoice
                 Text            = "Program Settings",
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 StartPosition   = FormStartPosition.CenterParent,
-                ClientSize      = new Size(350, 225),
+                ClientSize      = new Size(350, 235),
                 MaximizeBox     = false,
                 MinimizeBox     = false,
                 ShowInTaskbar   = false,
@@ -673,10 +748,11 @@ namespace MakeYourChoice
 
             var blockPanel = new GroupBox
             {
-                Text      = "Gatekeep Options",
-                Location  = new Point(10, modePanel.Bottom + 10),
-                Width     = 320,
-                Height    = 100
+                Text     = "Gatekeep Options",
+                Location = new Point(10, modePanel.Bottom + 10),
+                Width    = 320,
+                Height   = 110,
+                Padding  = new Padding(10)
             };
             var rbBoth = new RadioButton { Text = "Block both (default)", Location = new Point(10, 20), AutoSize = true };
             var rbPing = new RadioButton { Text = "Block UDP ping beacon endpoints", Location = new Point(10, rbBoth.Bottom + 5), AutoSize = true };
@@ -701,7 +777,6 @@ namespace MakeYourChoice
                 AutoSizeMode    = AutoSizeMode.GrowAndShrink,
                 Anchor          = AnchorStyles.Bottom | AnchorStyles.Right
             };
-            // position in bottom-right with 10px padding
             btnOk.Location = new Point(
                 dialog.ClientSize.Width - btnOk.Width - 10,
                 dialog.ClientSize.Height - btnOk.Height - 10
