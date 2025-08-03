@@ -2,6 +2,7 @@
     <PropertyGroup>
         <!-- target .NET 6 on Windows with WinForms -->
         <TargetFramework>net6.0-windows</TargetFramework>
+        <ApplicationHighDpiMode>DpiUnaware</ApplicationHighDpiMode>
         <UseWindowsForms>true</UseWindowsForms>
         <OutputType>WinExe</OutputType>
         <EnableWindowsTargeting>true</EnableWindowsTargeting>
