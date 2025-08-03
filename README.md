@@ -1,4 +1,8 @@
 # Make Your Choice
+[![Ko-fi](https://img.shields.io/badge/support_me_on_ko--fi-F16061?style=for-the-badge&logo=kofi&logoColor=f5f5f5)](https://ko-fi.com/kylo)
+[![Discord](https://img.shields.io/badge/join_my_discord_server-5865F2?style=for-the-badge&logo=discord&logoColor=f5f5f5)](https://discord.gg/mH7vgCEFWq)
+[![Codeberg](https://img.shields.io/badge/star_on_codeberg-2185D0?style=for-the-badge&logo=codeberg&logoColor=f5f5f5)](https://codeberg.org/ky/make-your-choice/stars)
+
 Make Your Choice is a server region changer for Dead by Daylight. It allows you to play on any server of choice.  
 
 <img src="https://i.imgur.com/wyNJ7HO.png" alt="Main" height="400"> <img src="https://i.imgur.com/J2pI1sy.png" alt="Main" height="400">  
