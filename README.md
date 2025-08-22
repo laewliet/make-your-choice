@@ -1,7 +1,6 @@
 # Make Your Choice
 [![Ko-fi](https://img.shields.io/badge/support_me_through_ko--fi-F16061?style=for-the-badge&logo=kofi&logoColor=f5f5f5)](https://ko-fi.com/kylo)
 [![Discord](https://img.shields.io/badge/join_my_discord_server-5865F2?style=for-the-badge&logo=discord&logoColor=f5f5f5)](https://discord.gg/mH7vgCEFWq)
-[![OpenSea](https://img.shields.io/badge/support_me_through_opensea-2081E2?style=for-the-badge&logo=opensea&logoColor=f5f5f5)](https://opensea.io/kairou)
 [![Codeberg](https://img.shields.io/badge/star_on_codeberg-2185D0?style=for-the-badge&logo=codeberg&logoColor=f5f5f5)](https://codeberg.org/ky/make-your-choice/stars)
 
 
