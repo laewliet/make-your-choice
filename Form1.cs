@@ -22,9 +22,10 @@ namespace MakeYourChoice
         private const string RepoUrl    = "https://codeberg.org/ky/make-your-choice";
         private const string WebsiteUrl = "https://kurocat.net";
         private const string DiscordUrl = "https://discord.gg/gnvtATeVc4";
-        private const string CurrentVersion = "0.7.3";
+        private const string CurrentVersion = "1.0.0-RC";
         private const string Developer = "ky";
         private const string Repo  = "make-your-choice";
+        private const string UpdateMessage  = "If you updated from an older version, please reset your hosts file since this version handles the hosts file differently.\n\nGo to the version menu, and select \"Reset hosts file\".";
 
         // Holds endpoint list and stability flag for each region
         private record RegionInfo(string[] Hosts, bool Stable);
@@ -43,16 +44,17 @@ namespace MakeYourChoice
             { "Canada (Central)",           new RegionInfo(new[]{ "gamelift.ca-central-1.amazonaws.com", "gamelift-ping.ca-central-1.api.aws" }, false) },
             { "South America (São Paulo)",  new RegionInfo(new[]{ "gamelift.sa-east-1.amazonaws.com",   "gamelift-ping.sa-east-1.api.aws" }, true) },
 
-            // Asia (excluding China)
+            // Asia (excluding Mainland China)
             { "Asia Pacific (Tokyo)",       new RegionInfo(new[]{ "gamelift.ap-northeast-1.amazonaws.com","gamelift-ping.ap-northeast-1.api.aws" }, true) },
             { "Asia Pacific (Seoul)",       new RegionInfo(new[]{ "gamelift.ap-northeast-2.amazonaws.com","gamelift-ping.ap-northeast-2.api.aws" }, true) },
             { "Asia Pacific (Mumbai)",      new RegionInfo(new[]{ "gamelift.ap-south-1.amazonaws.com",   "gamelift-ping.ap-south-1.api.aws" }, true) },
             { "Asia Pacific (Singapore)",   new RegionInfo(new[]{ "gamelift.ap-southeast-1.amazonaws.com","gamelift-ping.ap-southeast-1.api.aws" }, true) },
+            { "Asia Pacific (Hong Kong)",   new RegionInfo(new[]{ "ec2.ap-east-1.amazonaws.com","gamelift-ping.ap-east-1.api.aws" }, true) },
 
             // Oceania
             { "Asia Pacific (Sydney)",      new RegionInfo(new[]{ "gamelift.ap-southeast-2.amazonaws.com","gamelift-ping.ap-southeast-2.api.aws" }, true) },
 
-            // China
+            // Mainland China
             { "China (Beijing)",            new RegionInfo(new[]{ "gamelift.cn-north-1.amazonaws.com.cn" }, true) },
             { "China (Ningxia)",            new RegionInfo(new[]{ "gamelift.cn-northwest-1.amazonaws.com.cn" }, true) },
         };
@@ -70,18 +72,29 @@ namespace MakeYourChoice
         private BlockMode _blockMode = BlockMode.Both;
         private bool _mergeUnstable = true;
 
+        // Tracks the last launched version for update message display
+        private string _lastLaunchedVersion;
+
         // Path for saving user settings
         private static string SettingsFilePath =>
             Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Tigerbyte",
                 "MakeYourChoice",
                 "settings.json");
+
+        // Hosts file section marker and path
+        private const string SectionMarker = "# --+ Make Your Choice +--";
+        private static string HostsPath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "drivers\\etc\\hosts");
 
         private class UserSettings
         {
             public ApplyMode ApplyMode { get; set; }
             public BlockMode BlockMode { get; set; }
             public bool MergeUnstable { get; set; } = true;
+            public string LastLaunchedVersion { get; set; }
         }
 
         private void LoadSettings()
@@ -100,6 +113,7 @@ namespace MakeYourChoice
                     _applyMode = settings.ApplyMode;
                     _blockMode = settings.BlockMode;
                     _mergeUnstable = settings.MergeUnstable;
+                    _lastLaunchedVersion = settings.LastLaunchedVersion;
                 }
             }
             catch
@@ -121,6 +135,7 @@ namespace MakeYourChoice
                     ApplyMode = _applyMode,
                     BlockMode = _blockMode,
                     MergeUnstable = _mergeUnstable,
+                    LastLaunchedVersion = string.IsNullOrWhiteSpace(_lastLaunchedVersion) ? CurrentVersion : _lastLaunchedVersion,
                 };
                 var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(SettingsFilePath, json);
@@ -135,9 +150,16 @@ namespace MakeYourChoice
         {
             InitializeComponent();
             this.Icon = new Icon(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.ico"));
-            StartPingTimer();
+            this.Shown += (_, __) => StartPingTimer();
             _ = CheckForUpdatesAsync(true);
             LoadSettings();
+            // Show update message if version changed
+            if (!string.Equals(CurrentVersion, _lastLaunchedVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show(UpdateMessage, $"What's new in {CurrentVersion}", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                _lastLaunchedVersion = CurrentVersion;
+                SaveSettings();
+            }
             UpdateRegionListViewAppearance();
         }
 
@@ -174,10 +196,14 @@ namespace MakeYourChoice
                     UseShellExecute = true
                 });
             };
+            var miRestoreDefaultHosts = new ToolStripMenuItem("Reset hosts file");
+            miRestoreDefaultHosts.Click += (_, __) => RestoreWindowsDefaultHostsFile();
             mSource.DropDownItems.Add(miCheck);
             mSource.DropDownItems.Add(miRepo);
             mSource.DropDownItems.Add(miAbout);
             mSource.DropDownItems.Add(miOpenHostsFolder);
+            mSource.DropDownItems.Add(new ToolStripSeparator());
+            mSource.DropDownItems.Add(miRestoreDefaultHosts);
 
             var mOptions = new ToolStripMenuItem("Options");
             var miSettings = new ToolStripMenuItem("Program settings");
@@ -231,7 +257,7 @@ namespace MakeYourChoice
             var grpAmericas = new ListViewGroup("The Americas",HorizontalAlignment.Left) { Name = "Americas" };
             var grpAsia     = new ListViewGroup("Asia (Excl. Cn)",       HorizontalAlignment.Left) { Name = "Asia" };
             var grpOceania  = new ListViewGroup("Oceania",    HorizontalAlignment.Left) { Name = "Oceania" };
-            var grpChina    = new ListViewGroup("China",      HorizontalAlignment.Left) { Name = "China" };
+            var grpChina    = new ListViewGroup("Mainland China",      HorizontalAlignment.Left) { Name = "China" };
             _lv.Groups.AddRange(new[] { grpEurope, grpAmericas, grpAsia, grpOceania, grpChina });
             foreach (var kv in _regions)
             {
@@ -371,21 +397,35 @@ namespace MakeYourChoice
                     results[(string)item.Tag] = ms;
                 }
 
-                // Update UI in one batch to avoid flicker
-                _lv.Invoke((Action)(() =>
+                // Update UI in one batch to avoid flicker (only after handles exist)
+                if (!IsHandleCreated || IsDisposed || !_lv.IsHandleCreated || _lv.IsDisposed)
+                    return;
+
+                void UpdateLatencyUI()
                 {
                     _lv.BeginUpdate();
-                    foreach (ListViewItem item in _lv.Items)
+                    try
                     {
-                        var regionKey = (string)item.Tag;
-                        var ms = results[regionKey];
-                        var sub = item.SubItems[1];
-                        sub.Text      = ms >= 0 ? $"{ms} ms" : "disconnected";
-                        sub.ForeColor = GetColorForLatency(ms);
-                        sub.Font      = new Font(sub.Font, FontStyle.Italic);
+                        foreach (ListViewItem item in _lv.Items)
+                        {
+                            var regionKey = (string)item.Tag;
+                            var ms = results[regionKey];
+                            var sub = item.SubItems[1];
+                            sub.Text      = ms >= 0 ? $"{ms} ms" : "disconnected";
+                            sub.ForeColor = GetColorForLatency(ms);
+                            sub.Font      = new Font(sub.Font, FontStyle.Italic);
+                        }
                     }
-                    _lv.EndUpdate();
-                }));
+                    finally
+                    {
+                        _lv.EndUpdate();
+                    }
+                }
+
+                if (InvokeRequired)
+                    BeginInvoke((Action)UpdateLatencyUI);
+                else
+                    UpdateLatencyUI();
             };
             _pingTimer.Start();
         }
@@ -411,35 +451,6 @@ namespace MakeYourChoice
 
         private void BtnApply_Click(object sender, EventArgs e)
         {
-            // Clear hosts file before applying changes
-            var initialHostsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.System),
-                "drivers\\etc\\hosts");
-            try
-            {
-                File.WriteAllText(initialHostsPath, string.Empty);
-            }
-            catch
-            {
-                // ignore errors clearing hosts file
-            }
-            // Flush DNS cache before proceeding (clear any cached lookups so hosts file emptiness takes effect)
-            try
-            {
-                var flushInfo = new ProcessStartInfo("ipconfig", "/flushdns")
-                {
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                };
-                using (var flushProc = Process.Start(flushInfo))
-                {
-                    flushProc.WaitForExit();
-                }
-            }
-            catch
-            {
-                // ignore DNS flush errors
-            }
             // if universal redirect mode, redirect all endpoints to selected region's IPs
             if (_applyMode == ApplyMode.UniversalRedirect)
             {
@@ -482,10 +493,7 @@ namespace MakeYourChoice
 
                 try
                 {
-                    var hostsPath = Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.System),
-                        "drivers\\etc\\hosts");
-                    File.Copy(hostsPath, hostsPath + ".bak", true);
+                    File.Copy(HostsPath, HostsPath + ".bak", true);
 
                     var sb = new StringBuilder();
                     sb.AppendLine("# Edited by Make Your Choice (DbD Server Selector)");
@@ -505,8 +513,7 @@ namespace MakeYourChoice
                         sb.AppendLine();
                     }
 
-                    File.WriteAllText(hostsPath, sb.ToString());
-                    // Flush DNS cache after writing hosts file (force OS to reload new entries)
+                    WriteWrappedHostsSection(sb.ToString());
                     try
                     {
                         var psi = new ProcessStartInfo("ipconfig", "/flushdns")
@@ -519,12 +526,9 @@ namespace MakeYourChoice
                             proc.WaitForExit();
                         }
                     }
-                    catch
-                    {
-                        // ignore DNS flush errors
-                    }
+                    catch { /* ignore */ }
                     MessageBox.Show(
-                        "Hosts file updated and DNS cache flushed successfully!\n\nRestart DbD to make these changes take effect.",
+                        "The hosts file was updated successfully (Universal Redirect).\n\nPlease restart the game in order for changes to take effect.",
                         "Success",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
@@ -562,10 +566,7 @@ namespace MakeYourChoice
 
             try
             {
-                var hostsPath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.System),
-                    "drivers\\etc\\hosts");
-                File.Copy(hostsPath, hostsPath + ".bak", true);
+                File.Copy(HostsPath, HostsPath + ".bak", true);
 
                 // Determine if user selected any stable servers
                 var selectedRegions = _lv.CheckedItems.Cast<ListViewItem>()
@@ -643,8 +644,7 @@ namespace MakeYourChoice
                     sb.AppendLine();
                 }
 
-                File.WriteAllText(hostsPath, sb.ToString());
-                // Flush DNS cache after writing hosts file (force OS to reload new entries)
+                WriteWrappedHostsSection(sb.ToString());
                 try
                 {
                     var psi = new ProcessStartInfo("ipconfig", "/flushdns")
@@ -657,12 +657,9 @@ namespace MakeYourChoice
                         proc.WaitForExit();
                     }
                 }
-                catch
-                {
-                    // ignore DNS flush errors
-                }
+                catch { /* ignore */ }
                 MessageBox.Show(
-                    "Hosts file updated and DNS cache flushed successfully!\n\nRestart DbD to make these changes take effect.",
+                    "The hosts file was updated successfully (Gatekeep).\n\nPlease restart the game in order for changes to take effect.",
                     "Success",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -687,38 +684,25 @@ namespace MakeYourChoice
 
         private void BtnRevert_Click(object sender, EventArgs e)
         {
-            var hostsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.System),
-                "drivers\\etc\\hosts");
             try
             {
-                File.Copy(hostsPath, hostsPath + ".bak", true);
-
-                const string defaultHosts = @"# Copyright (c) 1993-2009 Microsoft Corp.
-#
-# This is a sample HOSTS file used by Microsoft TCP/IP for Windows.
-#
-# This file contains the mappings of IP addresses to host names. Each
-# entry should be kept on an individual line. The IP address should
-# be placed in the first column followed by the corresponding host name.
-# The IP address and the host name should be separated by at least one
-# space.
-#
-# Additionally, comments (such as these) may be inserted on individual
-# lines or following the machine name denoted by a '#' symbol.
-#
-# For example:
-#
-#       102.54.94.97     rhino.acme.com          # source server
-#        38.25.63.10     x.acme.com              # x client host
-#
-# localhost name resolution is handled within DNS itself.
-#       127.0.0.1       localhost
-#       ::1             localhost
-";
-                File.WriteAllText(hostsPath, defaultHosts);
+                File.Copy(HostsPath, HostsPath + ".bak", true);
+                WriteWrappedHostsSection(string.Empty);
+                try
+                {
+                    var psi = new ProcessStartInfo("ipconfig", "/flushdns")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    using (var proc = Process.Start(psi))
+                    {
+                        proc.WaitForExit();
+                    }
+                }
+                catch { /* ignore */ }
                 MessageBox.Show(
-                    "Hosts file reverted to the Windows default.",
+                    "Cleared Make Your Choice entries. Your existing hosts lines were left untouched.",
                     "Reverted",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -739,6 +723,49 @@ namespace MakeYourChoice
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }
+        }
+
+        // Helper to write/update the wrapped hosts section (between SectionMarker lines)
+        private void WriteWrappedHostsSection(string innerContent)
+        {
+            // Ensure Windows CRLF when writing
+            string NormalizeToLf(string s) => s.Replace("\r\n", "\n").Replace("\r", "\n");
+
+            // Read current hosts (or empty if missing)
+            string original = string.Empty;
+            try { original = File.ReadAllText(HostsPath); } catch { /* ignore */ }
+
+            string lf = NormalizeToLf(original);
+            int first = lf.IndexOf(SectionMarker, StringComparison.Ordinal);
+            int last  = first >= 0 ? lf.IndexOf(SectionMarker, first + SectionMarker.Length, StringComparison.Ordinal) : -1;
+
+            // Build the new wrapped block (marker, content, marker) using LF first
+            string innerLf = NormalizeToLf(innerContent ?? string.Empty);
+            if (innerLf.Length > 0 && !innerLf.EndsWith("\n")) innerLf += "\n";
+            string wrapped = SectionMarker + "\n" + innerLf + SectionMarker + "\n";
+
+            string newLf;
+            if (first >= 0 && last >= 0)
+            {
+                // Replace everything from first marker through the second marker
+                int afterLast = last + SectionMarker.Length;
+                newLf = lf.Substring(0, first) + wrapped + lf.Substring(afterLast);
+            }
+            else if (first >= 0 && last < 0)
+            {
+                // Corrupt/partial state: one marker only. Replace from that marker to end with a clean wrapped block.
+                newLf = lf.Substring(0, first) + wrapped;
+            }
+            else
+            {
+                // No markers present: append two blank lines, then our wrapped block
+                string suffix = (lf.EndsWith("\n") ? "\n" : "\n") + "\n" + wrapped; // ensures at least two newlines before the marker
+                newLf = lf + suffix;
+            }
+
+            // Backup and write
+            try { File.Copy(HostsPath, HostsPath + ".bak", true); } catch { /* ignore */ }
+            try { File.WriteAllText(HostsPath, newLf.Replace("\n", "\r\n")); } catch { throw; }
         }
 
         private void OpenUrl(string url)
@@ -1009,6 +1036,87 @@ namespace MakeYourChoice
                     item.ForeColor = Color.Orange;
                     item.ToolTipText = "Unstable server: latency issues may occur.";
                 }
+            }
+        }
+
+        private void RestoreWindowsDefaultHostsFile()
+        {
+            var confirm = MessageBox.Show(
+                "If you are having problems, or the program doesn't seem to work correctly, try resetting your hosts file.\n\nThis will overwrite your entire hosts file with the Windows default.\n\nA backup will be saved as hosts.bak. Continue?",
+                "Restore Windows default hosts file",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning
+            );
+            if (confirm != DialogResult.Yes)
+                return;
+
+            try
+            {
+                // Backup current hosts
+                try { File.Copy(HostsPath, HostsPath + ".bak", true); } catch { /* ignore backup errors */ }
+
+                // Default Windows hosts file content (CRLF endings)
+                var defaultHosts =
+                    "# Copyright (c) 1993-2009 Microsoft Corp.\r\n" +
+                    "#\r\n" +
+                    "# This is a sample HOSTS file used by Microsoft TCP/IP for Windows.\r\n" +
+                    "#\r\n" +
+                    "# This file contains the mappings of IP addresses to host names. Each\r\n" +
+                    "# entry should be kept on an individual line. The IP address should\r\n" +
+                    "# be placed in the first column followed by the corresponding host name.\r\n" +
+                    "# The IP address and the host name should be separated by at least one\r\n" +
+                    "# space.\r\n" +
+                    "#\r\n" +
+                    "# Additionally, comments (such as these) may be inserted on individual\r\n" +
+                    "# lines or following the machine name denoted by a '#' symbol.\r\n" +
+                    "#\r\n" +
+                    "# For example:\r\n" +
+                    "#\r\n" +
+                    "#       102.54.94.97     rhino.acme.com          # source server\r\n" +
+                    "#        38.25.63.10     x.acme.com              # x client host\r\n" +
+                    "#\r\n" +
+                    "# localhost name resolution is handled within DNS itself.\r\n" +
+                    "#       127.0.0.1       localhost\r\n" +
+                    "#       ::1             localhost\r\n";
+
+                File.WriteAllText(HostsPath, defaultHosts);
+
+                // Attempt to flush DNS (best effort)
+                try
+                {
+                    var psi = new ProcessStartInfo("ipconfig", "/flushdns")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    using (var proc = Process.Start(psi)) { proc.WaitForExit(); }
+                }
+                catch { /* ignore */ }
+
+                MessageBox.Show(
+                    "Hosts file restored to Windows default template.",
+                    "Success",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+            }
+            catch (UnauthorizedAccessException)
+            {
+                MessageBox.Show(
+                    "Please run as Administrator to modify the hosts file.",
+                    "Permission Denied",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    ex.Message,
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
             }
         }
     }
