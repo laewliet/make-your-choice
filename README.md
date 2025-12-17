@@ -13,7 +13,7 @@
 
 Make Your Choice is a server region changer for Dead by Daylight. It allows you to play on any server of choice.
 
-<img src="https://i.imgur.com/0oTcfwz.png" alt="Main">
+<img src="https://i.imgur.com/oJetRV7.png" alt="Main">
 
 
 # Download
