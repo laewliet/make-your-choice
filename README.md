@@ -4,9 +4,11 @@
 > ↳ [Visit the old repository](https://codeberg.org/ky/make-your-choice).
 
 # Make Your Choice
+[![GitHub Downloads](https://img.shields.io/github/downloads/laewliet/make-your-choice/total?style=for-the-badge&logo=github&logoColor=white)](https://github.com/laewliet/make-your-choice/releases)
+[![Codeberg Downloads](https://img.shields.io/badge/dynamic/json?style=for-the-badge&logo=codeberg&logoColor=f5f5f5&label=downloads+(latest+release)&query=$.assets[0].download_count&url=https://codeberg.org/api/v1/repos/ky/make-your-choice/releases/latest)](https://codeberg.org/ky/make-your-choice/releases)
 [![Ko-fi](https://img.shields.io/badge/support_me_through_ko--fi-F16061?style=for-the-badge&logo=kofi&logoColor=f5f5f5)](https://ko-fi.com/kylo)
 [![Discord](https://img.shields.io/badge/join_my_discord_server-5865F2?style=for-the-badge&logo=discord&logoColor=f5f5f5)](https://discord.gg/mH7vgCEFWq)
-[![Codeberg](https://img.shields.io/badge/star_on_codeberg-2185D0?style=for-the-badge&logo=codeberg&logoColor=f5f5f5)](https://codeberg.org/ky/make-your-choice/stars)
+
 
 
 Make Your Choice is a server region changer for Dead by Daylight. It allows you to play on any server of choice.
