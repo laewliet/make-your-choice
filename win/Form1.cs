@@ -22,7 +22,7 @@ namespace MakeYourChoice
         private const string RepoUrl    = "https://github.com/laewliet/make-your-choice";
         private const string DiscordUrl = "https://discord.gg/gnvtATeVc4";
         private const string CurrentVersion = "2.0.0-RC"; // Must match git tag for updates, (and AssemblyInfo version, which is not yet implemented)
-        private const string Developer = "lawliet"; // GitHub username, DO NOT CHANGE, as changing this breaks the license compliance
+        private const string Developer = "laewliet"; // GitHub username, DO NOT CHANGE, as changing this breaks the license compliance
         private const string Repo  = "make-your-choice"; // Repository name
         private const string UpdateMessage  = "Welcome back! Here are the new features and changes in this version:\n\n" +
                                               "- Introduced Linux / Steam Deck version.\n" +
@@ -316,6 +316,7 @@ namespace MakeYourChoice
             try
             {
                 using var client = new HttpClient();
+                client.DefaultRequestHeaders.Add("User-Agent", "MakeYourChoice");
                 // fetch all releases
                 var url = $"https://api.github.com/repos/{Developer}/{Repo}/releases";
                 var releases = await client.GetFromJsonAsync<List<Release>>(url);
