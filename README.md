@@ -5,7 +5,7 @@
 
 # Make Your Choice
 [![GitHub Downloads](https://img.shields.io/github/downloads/laewliet/make-your-choice/total?style=for-the-badge&logo=github&logoColor=white)](https://github.com/laewliet/make-your-choice/releases)
-[![Codeberg Downloads](https://img.shields.io/badge/dynamic/json?style=for-the-badge&logo=codeberg&logoColor=f5f5f5&label=downloads+(1.0.0+only)&query=$.assets[0].download_count&url=https://codeberg.org/api/v1/repos/ky/make-your-choice/releases/latest)](https://codeberg.org/ky/make-your-choice/releases)
+[![Codeberg Downloads](https://img.shields.io/badge/dynamic/json?style=for-the-badge&logo=codeberg&logoColor=f5f5f5&label=downloads+(1.0.0+RC)&query=$.assets[0].download_count&url=https://codeberg.org/api/v1/repos/ky/make-your-choice/releases/tags/1.0.0-RC)](https://codeberg.org/ky/make-your-choice/releases/tag/1.0.0-RC)
 [![Discord](https://img.shields.io/discord/1173896039401521245?style=for-the-badge&logo=discord&logoColor=f5f5f5)](https://discord.gg/mH7vgCEFWq)
 [![Ko-fi](https://img.shields.io/badge/support_me_through_ko--fi-F16061?style=for-the-badge&logo=kofi&logoColor=f5f5f5)](https://ko-fi.com/kylo)
 
