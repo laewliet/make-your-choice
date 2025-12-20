@@ -16,6 +16,7 @@ Make Your Choice is a server region changer for Dead by Daylight. It allows you 
 # Download & Installation
 
 ## Windows
+### Installation
 Download the latest `.exe` file from the [Releases](https://github.com/laewliet/make-your-choice/releases/latest) page and run it as administrator.
 
 ### Supported Windows Versions
@@ -30,15 +31,26 @@ The application needs to be run with [administrator permissions](https://learn.m
 The SmartScreen Alert only appears on Windows 8 and newer.  
 
 ## Linux / SteamOS
-
-### Linux Dependencies & Build Requirements
-- GTK4
-- polkit
-- Rust toolchain
-- GTK4 development libraries
-- Standard build tools (gcc, pkg-config, make)
-
-### Arch Linux (AUR)
+### Prerequisites
+Install the prerequisite packages in order to build, install and run the program. If your distro isn't listed below, find out the correct package names for your distro's package manager.
+#### Arch / SteamOS
+```bash
+sudo pacman -S rust gtk4 polkit base-devel git
+```
+#### Debian / Ubuntu / ZorinOS
+```bash
+sudo apt install cargo rustc make gcc pkg-config libgtk-4-dev git policykit-1
+```
+#### Fedora
+```bash
+sudo dnf install cargo rust make gcc pkg-config gtk4-devel git polkit
+```
+#### openSUSE
+```bash
+sudo zypper install cargo rust make gcc pkg-config gtk4-devel git polkit
+```
+### Installation
+#### Arch (AUR)
 
 For Arch Linux users, install from the AUR using your preferred AUR helper:
 ```bash
@@ -52,7 +64,7 @@ paru -S make-your-choice
 pikaur -S make-your-choice
 ```
 
-### Other Linux Distros (Build and Install from Source)
+#### Other Linux Distros (Build and Install from Source)
 
 Clone and install using Makefile:
 ```bash
