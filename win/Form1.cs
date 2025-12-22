@@ -20,13 +20,16 @@ namespace MakeYourChoice
     public class Form1 : Form
     {
         private const string RepoUrl    = "https://github.com/laewliet/make-your-choice";
-        private const string DiscordUrl = "https://discord.gg/gnvtATeVc4";
-        private const string CurrentVersion = "2.0.0-RC"; // Must match git tag for updates, (and AssemblyInfo version, which is not yet implemented)
+        private const string DiscordUrl = "https://discord.gg/xEMyAA8gn8";
+        private const string CurrentVersion = "2.1.0"; // Must match git tag for updates, (and AssemblyInfo version, which is not yet implemented)
         private const string Developer = "laewliet"; // GitHub username, DO NOT CHANGE, as changing this breaks the license compliance
         private const string Repo  = "make-your-choice"; // Repository name
-        private const string UpdateMessage  = "Welcome back! Here are the new features and changes in this version:\n\n" +
-                                              "- Introduced Linux / Steam Deck version.\n" +
-                                              "Thank you for your support!";
+        private const string UpdateMessage = "Welcome back! Here are the new features and changes in this version:\n\n" +
+                                                "- Added color coded latency on Linux.\n" +
+                                                "- Improved \"About\" dialog menu.\n" +
+                                                "- Fixed the Discord invite link. (fr)\n" +
+                                                "- Fixed a bug where the *unstable* warning would show at all times on Linux.\n\n" +
+                                                "Thank you for your support!";
 
         // Holds endpoint list and stability flag for each region
         private record RegionInfo(string[] Hosts, bool Stable);
@@ -270,7 +273,7 @@ namespace MakeYourChoice
                 if (!kv.Value.Stable)
                 {
                     item.ForeColor = Color.Orange;
-                    item.ToolTipText = "Unstable server: latency issues may occur.";
+                    item.ToolTipText = "Unstable: issues may occur.";
                 }
                 item.SubItems.Add("…");
                 _lv.Items.Add(item);
@@ -778,11 +781,11 @@ namespace MakeYourChoice
                 Text            = "About Make Your Choice",
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 StartPosition   = FormStartPosition.CenterParent,
-                ClientSize      = new Size(480, 140),
+                ClientSize      = new Size(500, 380),
                 MaximizeBox     = false,
                 MinimizeBox     = false,
                 ShowInTaskbar   = false,
-                Padding         = new Padding(10)
+                Padding         = new Padding(20)
             };
 
             var lblTitle = new Label
@@ -790,30 +793,63 @@ namespace MakeYourChoice
                 Text     = "Make Your Choice (DbD Server Selector)",
                 Font     = new Font(Font.FontFamily, 10, FontStyle.Bold),
                 AutoSize = true,
-                Location = new Point(10, 10)
+                Location = new Point(20, 20)
             };
 
+            // Developer label. This must always refer to the original developer. Changing this breaks license compliance.
             var lblDeveloper = new LinkLabel
             {
                 Text     = "Developer: " + Developer,
                 Font     = new Font(Font.FontFamily, 8),
                 AutoSize = true,
-                Location = new Point(10, lblTitle.Bottom + 10)
+                Location = new Point(20, lblTitle.Bottom + 10)
             };
-            lblDeveloper.Links.Add(11, 2, "https://github.com/" + Developer);
+            lblDeveloper.Links.Add(11, Developer.Length, "https://github.com/" + Developer);
             lblDeveloper.LinkClicked += (s, e) =>
             {
                 Process.Start(new ProcessStartInfo(e.Link.LinkData.ToString()) { UseShellExecute = true });
             };
-            about.Controls.Add(lblDeveloper);
 
             var lblVersion = new Label
             {
-                Text     = $"Version {CurrentVersion}\nWindows 7 Service Pack 1 or higher.",
+                Text     = $"Version {CurrentVersion}\nWindows 7 or higher.",
                 Font     = new Font(Font.FontFamily, 8, FontStyle.Italic),
                 AutoSize = true,
-                Location = new Point(10, lblDeveloper.Bottom + 10)
+                Location = new Point(20, lblDeveloper.Bottom + 10)
             };
+
+            // Separator
+            var separator = new Panel
+            {
+                Height   = 1,
+                Width    = 460,
+                Location = new Point(20, lblVersion.Bottom + 15),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+
+            // Copyright notice
+            var lblCopyright = new Label
+            {
+                Text     = "Copyright © 2025",
+                Font     = new Font(Font.FontFamily, 8),
+                AutoSize = true,
+                Location = new Point(20, separator.Bottom + 15)
+            };
+
+            // License information
+            var lblLicense = new Label
+            {
+                Text     = "This program is free software licensed\n" +
+                          "under the terms of the GNU General Public License.\n" +
+                          "This program is distributed in the hope that it will be useful, but\n" +
+                          "without any warranty. See the GNU General Public License\n" +
+                          "for more details.",
+                Font     = new Font(Font.FontFamily, 8),
+                AutoSize = true,
+                Location = new Point(20, lblCopyright.Bottom + 10),
+                MaximumSize = new Size(460, 0)
+            };
+
             var btnOk = new Button
             {
                 Text         = "Awesome!",
@@ -823,12 +859,16 @@ namespace MakeYourChoice
                 Anchor       = AnchorStyles.Bottom | AnchorStyles.Right,
             };
             btnOk.Location = new Point(
-                about.ClientSize.Width - btnOk.Width - 10,
-                about.ClientSize.Height - btnOk.Height - 10
+                about.ClientSize.Width - btnOk.Width - 20,
+                about.ClientSize.Height - btnOk.Height - 20
             );
 
             about.Controls.Add(lblTitle);
+            about.Controls.Add(lblDeveloper);
             about.Controls.Add(lblVersion);
+            about.Controls.Add(separator);
+            about.Controls.Add(lblCopyright);
+            about.Controls.Add(lblLicense);
             about.Controls.Add(btnOk);
             about.AcceptButton = btnOk;
             about.ShowDialog(this);
