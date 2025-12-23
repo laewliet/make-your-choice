@@ -180,7 +180,7 @@ fn build_ui(app: &Application) {
     // Load configuration
     let config = AppConfig {
         repo_url: format!("https://github.com/{}/make-your-choice", developer),
-        current_version: "2.2.0".to_string(), // Must match git tag for updates, and Cargo.toml version
+        current_version: "v2.2.0".to_string(), // Must match git tag for updates
         developer: developer.clone(), // Git username fetched from API
         repo: "make-your-choice".to_string(), // Repository name
         update_message: "Welcome back! Here are the new features and changes in this version:\n\n\
@@ -471,7 +471,7 @@ fn build_ui(app: &Application) {
     // Version menu button
     let version_menu = create_version_menu(&window, &app_state);
     let version_btn = MenuButton::builder()
-        .label(&format!("v{}", config.current_version))
+        .label(&config.current_version)
         .menu_model(&version_menu)
         .build();
 
