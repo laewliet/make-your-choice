@@ -20,7 +20,7 @@ namespace MakeYourChoice
     public class Form1 : Form
     {
         private const string DiscordUrl = "https://discord.gg/xEMyAA8gn8";
-        private const string CurrentVersion = "2.2.0"; // Must match git tag for updates, (and AssemblyInfo version, which is not yet implemented)
+        private const string CurrentVersion = "v2.2.0"; // Must match git tag for updates, (and AssemblyInfo version, which is not yet implemented)
         private const string Repo  = "make-your-choice"; // Repository name
         private readonly string Developer; // Git username, fetched from API or cached
         private string RepoUrl => $"https://github.com/{Developer}/{Repo}";
@@ -153,21 +153,26 @@ namespace MakeYourChoice
             }
         }
 
-        private static async Task<string> FetchGitIdentityAsync()
+        private static string FetchGitIdentity()
         {
             const string GitUserId = "109703063"; // Changing this, or the final result of this functionality may break license compliance
             string url = $"https://api.github.com/user/{GitUserId}";
 
             try
             {
-                using var client = new HttpClient();
-                client.DefaultRequestHeaders.Add("User-Agent", "MakeYourChoice");
-                var response = await client.GetStringAsync(url);
-                var json = JsonSerializer.Deserialize<JsonElement>(response);
-                if (json.TryGetProperty("login", out var login))
+                // Use Task.Run to avoid deadlock on UI thread
+                return Task.Run(async () =>
                 {
-                    return login.GetString();
-                }
+                    using var client = new HttpClient();
+                    client.DefaultRequestHeaders.Add("User-Agent", "MakeYourChoice");
+                    var response = await client.GetStringAsync(url);
+                    var json = JsonSerializer.Deserialize<JsonElement>(response);
+                    if (json.TryGetProperty("login", out var login))
+                    {
+                        return login.GetString();
+                    }
+                    return null;
+                }).GetAwaiter().GetResult();
             }
             catch
             {
@@ -181,7 +186,7 @@ namespace MakeYourChoice
         {
             // Fetch git identifier from API or use cached value
             LoadSettings(); // Load settings first to get cached value
-            var fetched = FetchGitIdentityAsync().GetAwaiter().GetResult();
+            var fetched = FetchGitIdentity();
             if (fetched != null)
             {
                 // Successfully fetched, update cache and use it
@@ -229,7 +234,7 @@ namespace MakeYourChoice
             // ── MenuStrip ────────────────────────────────────────────────
             _menuStrip = new MenuStrip();
 
-            var mSource = new ToolStripMenuItem($"v{CurrentVersion}");
+            var mSource = new ToolStripMenuItem(CurrentVersion);
             var miRepo  = new ToolStripMenuItem("Repository");
             miRepo.Click += (_,__) => OpenUrl(RepoUrl);
             var miAbout   = new ToolStripMenuItem("About");
