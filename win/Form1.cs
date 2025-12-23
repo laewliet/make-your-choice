@@ -19,11 +19,11 @@ namespace MakeYourChoice
 {
     public class Form1 : Form
     {
-        private const string RepoUrl    = "https://github.com/laewliet/make-your-choice";
         private const string DiscordUrl = "https://discord.gg/xEMyAA8gn8";
-        private const string CurrentVersion = "2.1.0"; // Must match git tag for updates, (and AssemblyInfo version, which is not yet implemented)
-        private const string Developer = "laewliet"; // GitHub username, DO NOT CHANGE, as changing this breaks the license compliance
+        private const string CurrentVersion = "2.2.0"; // Must match git tag for updates, (and AssemblyInfo version, which is not yet implemented)
         private const string Repo  = "make-your-choice"; // Repository name
+        private readonly string Developer; // Git username, fetched from API or cached
+        private string RepoUrl => $"https://github.com/{Developer}/{Repo}";
         private const string UpdateMessage = "Welcome back! Here are the new features and changes in this version:\n\n" +
                                                 "- Added color coded latency on Linux.\n" +
                                                 "- Improved \"About\" dialog menu.\n" +
@@ -78,6 +78,7 @@ namespace MakeYourChoice
 
         // Tracks the last launched version for update message display
         private string _lastLaunchedVersion;
+        private string _freshestGitIdentity;
 
         // Path for saving user settings
         private static string SettingsFilePath =>
@@ -98,6 +99,7 @@ namespace MakeYourChoice
             public BlockMode BlockMode { get; set; }
             public bool MergeUnstable { get; set; } = true;
             public string LastLaunchedVersion { get; set; }
+            public string FreshestGitIdentity { get; set; }
         }
 
         private void LoadSettings()
@@ -117,6 +119,7 @@ namespace MakeYourChoice
                     _blockMode = settings.BlockMode;
                     _mergeUnstable = settings.MergeUnstable;
                     _lastLaunchedVersion = settings.LastLaunchedVersion;
+                    _freshestGitIdentity = settings.FreshestGitIdentity;
                 }
             }
             catch
@@ -139,6 +142,7 @@ namespace MakeYourChoice
                     BlockMode = _blockMode,
                     MergeUnstable = _mergeUnstable,
                     LastLaunchedVersion = string.IsNullOrWhiteSpace(_lastLaunchedVersion) ? CurrentVersion : _lastLaunchedVersion,
+                    FreshestGitIdentity = _freshestGitIdentity,
                 };
                 var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(SettingsFilePath, json);
@@ -149,13 +153,57 @@ namespace MakeYourChoice
             }
         }
 
+        private static async Task<string> FetchGitIdentityAsync()
+        {
+            const string GitUserId = "109703063"; // Changing this, or the final result of this functionality may break license compliance
+            string url = $"https://api.github.com/user/{GitUserId}";
+
+            try
+            {
+                using var client = new HttpClient();
+                client.DefaultRequestHeaders.Add("User-Agent", "MakeYourChoice");
+                var response = await client.GetStringAsync(url);
+                var json = JsonSerializer.Deserialize<JsonElement>(response);
+                if (json.TryGetProperty("login", out var login))
+                {
+                    return login.GetString();
+                }
+            }
+            catch
+            {
+                // API call failed, return null to use cached value
+            }
+
+            return null;
+        }
+
         public Form1()
         {
+            // Fetch git identifier from API or use cached value
+            LoadSettings(); // Load settings first to get cached value
+            var fetched = FetchGitIdentityAsync().GetAwaiter().GetResult();
+            if (fetched != null)
+            {
+                // Successfully fetched, update cache and use it
+                _freshestGitIdentity = fetched;
+                Developer = fetched;
+                SaveSettings();
+            }
+            else if (!string.IsNullOrEmpty(_freshestGitIdentity))
+            {
+                // Use cached value
+                Developer = _freshestGitIdentity;
+            }
+            else
+            {
+                // No cached value and fetch failed
+                Developer = "n/a";
+            }
+
             InitializeComponent();
             this.Icon = new Icon(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.ico"));
             this.Shown += (_, __) => StartPingTimer();
             _ = CheckForUpdatesAsync(true);
-            LoadSettings();
             // Show update message if version changed
             if (!string.Equals(CurrentVersion, _lastLaunchedVersion, StringComparison.OrdinalIgnoreCase))
             {
@@ -450,8 +498,234 @@ namespace MakeYourChoice
             return "Asia";
         }
 
+        private List<string> GetAllManagedHostnames()
+        {
+            var hostnames = new HashSet<string>();
+            foreach (var region in _regions.Values)
+            {
+                foreach (var host in region.Hosts)
+                {
+                    hostnames.Add(host.ToLowerInvariant());
+                }
+            }
+            return hostnames.ToList();
+        }
+
+        private List<string> DetectConflictingEntries()
+        {
+            var conflicts = new List<string>();
+            var managedHosts = GetAllManagedHostnames();
+
+            try
+            {
+                string hostsContent = File.ReadAllText(HostsPath);
+                string normalized = hostsContent.Replace("\r\n", "\n").Replace("\r", "\n");
+
+                // Find the section markers
+                int firstMarker = normalized.IndexOf(SectionMarker, StringComparison.Ordinal);
+                int secondMarker = firstMarker >= 0
+                    ? normalized.IndexOf(SectionMarker, firstMarker + SectionMarker.Length, StringComparison.Ordinal)
+                    : -1;
+
+                // Get content outside markers
+                string outsideContent;
+                if (firstMarker >= 0 && secondMarker >= 0)
+                {
+                    // Content before first marker + content after second marker
+                    int afterSecond = secondMarker + SectionMarker.Length;
+                    outsideContent = normalized.Substring(0, firstMarker) +
+                                   (afterSecond < normalized.Length ? normalized.Substring(afterSecond) : "");
+                }
+                else if (firstMarker >= 0)
+                {
+                    // Only first marker found, take content before it
+                    outsideContent = normalized.Substring(0, firstMarker);
+                }
+                else
+                {
+                    // No markers, all content is outside
+                    outsideContent = normalized;
+                }
+
+                // Parse lines and check for conflicts
+                var lines = outsideContent.Split('\n');
+                foreach (var line in lines)
+                {
+                    var trimmed = line.Trim();
+
+                    // Skip empty lines and commented lines (lines starting with #)
+                    if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#"))
+                        continue;
+
+                    // Parse host entry (format: IP hostname)
+                    var parts = trimmed.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 2)
+                    {
+                        // Check if hostname matches any managed host
+                        var hostname = parts[1].ToLowerInvariant();
+                        if (managedHosts.Contains(hostname) && !conflicts.Contains(trimmed))
+                        {
+                            conflicts.Add(trimmed);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // If we can't read the file, no conflicts detected
+            }
+
+            return conflicts;
+        }
+
+        private void ClearConflictingEntries(List<string> conflicts)
+        {
+            try
+            {
+                string hostsContent = File.ReadAllText(HostsPath);
+                string normalized = hostsContent.Replace("\r\n", "\n").Replace("\r", "\n");
+
+                // Remove each conflicting line
+                var lines = normalized.Split('\n').ToList();
+                var conflictSet = new HashSet<string>(conflicts.Select(c => c.Trim()));
+
+                for (int i = lines.Count - 1; i >= 0; i--)
+                {
+                    if (conflictSet.Contains(lines[i].Trim()))
+                    {
+                        lines.RemoveAt(i);
+                    }
+                }
+
+                // Write back
+                string cleaned = string.Join("\n", lines).Replace("\n", "\r\n");
+                File.Copy(HostsPath, HostsPath + ".bak", true);
+                File.WriteAllText(HostsPath, cleaned);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Failed to clear conflicting entries:\n" + ex.Message,
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                throw;
+            }
+        }
+
+        private bool ShowConflictDialog(List<string> conflicts, out bool clearConflicts)
+        {
+            clearConflicts = true;
+
+            var dialog = new Form
+            {
+                Text = "Conflicting Hosts Entries Detected",
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                StartPosition = FormStartPosition.CenterParent,
+                ClientSize = new Size(500, 250),
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ShowInTaskbar = false,
+                Padding = new Padding(15)
+            };
+
+            var lblMessage = new Label
+            {
+                Text = "It seems like there are conflicting entries in your hosts file.\n\n" +
+                       "This is usually caused by another program, or by manual changes.\n\n" +
+                       "It's best to resolve these issues first before applying a new configuration.\n" +
+                       "Would you like to clear out all conflicting entries?",
+                AutoSize = false,
+                Size = new Size(470, 100),
+                Location = new Point(15, 15)
+            };
+
+            var rbClear = new RadioButton
+            {
+                Text = "Clear out conflicts, and apply selection (Recommended)",
+                AutoSize = true,
+                Location = new Point(15, 125),
+                Checked = true
+            };
+
+            var rbKeep = new RadioButton
+            {
+                Text = "Apply selection without clearing out conflicts",
+                AutoSize = true,
+                Location = new Point(15, rbClear.Bottom + 10)
+            };
+
+            var btnContinue = new Button
+            {
+                Text = "Continue",
+                DialogResult = DialogResult.OK,
+                Size = new Size(90, 30),
+                Location = new Point(dialog.ClientSize.Width - 90 - 15 - 90 - 10, dialog.ClientSize.Height - 30 - 15)
+            };
+
+            var btnCancel = new Button
+            {
+                Text = "Cancel",
+                DialogResult = DialogResult.Cancel,
+                Size = new Size(90, 30),
+                Location = new Point(dialog.ClientSize.Width - 90 - 15, dialog.ClientSize.Height - 30 - 15)
+            };
+
+            dialog.Controls.Add(lblMessage);
+            dialog.Controls.Add(rbClear);
+            dialog.Controls.Add(rbKeep);
+            dialog.Controls.Add(btnContinue);
+            dialog.Controls.Add(btnCancel);
+            dialog.AcceptButton = btnContinue;
+            dialog.CancelButton = btnCancel;
+
+            var result = dialog.ShowDialog(this);
+            if (result != DialogResult.OK)
+                return false;
+
+            clearConflicts = rbClear.Checked;
+
+            // If user chose to keep conflicts, show confirmation
+            if (!clearConflicts)
+            {
+                var confirm = MessageBox.Show(
+                    "Not clearing out conflicting entries will cause unexpected behavior.\n\n" +
+                    "Are you sure you want to continue?",
+                    "Confirm",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+
+                if (confirm != DialogResult.Yes)
+                    return false;
+            }
+
+            return true;
+        }
+
         private void BtnApply_Click(object sender, EventArgs e)
         {
+            // Check for conflicting entries before proceeding
+            var conflicts = DetectConflictingEntries();
+            if (conflicts.Count > 0)
+            {
+                bool clearConflicts;
+                if (!ShowConflictDialog(conflicts, out clearConflicts))
+                    return; // User cancelled
+
+                if (clearConflicts)
+                {
+                    try
+                    {
+                        ClearConflictingEntries(conflicts);
+                    }
+                    catch
+                    {
+                        return; // Error already shown in ClearConflictingEntries
+                    }
+                }
+            }
+
             // if universal redirect mode, redirect all endpoints to selected region's IPs
             if (_applyMode == ApplyMode.UniversalRedirect)
             {
