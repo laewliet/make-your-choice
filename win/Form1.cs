@@ -1182,7 +1182,7 @@ namespace MakeYourChoice
                 Width         = 300
             };
             // populate mode choices
-            cbApplyMode.Items.AddRange(new[] { "Gatekeep (default)", "Universal Redirect" });
+            cbApplyMode.Items.AddRange(new[] { "Gatekeep (default)", "Universal Redirect (deprecated)" });
             cbApplyMode.SelectedIndex = _applyMode == ApplyMode.UniversalRedirect ? 1 : 0;
             modePanel.Controls.Add(cbApplyMode);
 
@@ -1257,7 +1257,7 @@ namespace MakeYourChoice
             // ── Tip label for settings ────────────────────────────────────────
             var lblTipSettings = new Label
             {
-                Text = "Default options are recommended. If the default method doesn't work, try an alternative method above. Your experience may vary by using settings other than the default.",
+                Text = "The default options are recommended. You may not want to change these if you aren't sure of what you are doing. Your experience may vary by using settings other than the default.",
                 AutoSize = true,
                 MaximumSize = new Size(320, 0),
                 TextAlign = ContentAlignment.MiddleLeft,

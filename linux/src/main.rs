@@ -1085,7 +1085,7 @@ fn show_settings_dialog(app_state: &Rc<AppState>, parent: &ApplicationWindow) {
     mode_label.set_halign(gtk4::Align::Start);
     let mode_combo = ComboBoxText::new();
     mode_combo.append_text("Gatekeep (default)");
-    mode_combo.append_text("Universal Redirect");
+    mode_combo.append_text("Universal Redirect (deprecated)");
 
     let settings = app_state.settings.lock().unwrap();
     mode_combo.set_active(Some(match settings.apply_mode {
@@ -1125,6 +1125,17 @@ fn show_settings_dialog(app_state: &Rc<AppState>, parent: &ApplicationWindow) {
     settings_box.append(&rb_service);
     settings_box.append(&Separator::new(Orientation::Horizontal));
     settings_box.append(&merge_check);
+    settings_box.append(&Separator::new(Orientation::Horizontal));
+
+    // Tip label
+    let tip_label = Label::new(Some(
+        "The default options are recommended. You may not want to change these if you aren't sure of what you are doing. Your experience may vary by using settings other than the default."
+    ));
+    tip_label.set_wrap(true);
+    tip_label.set_max_width_chars(40);
+    tip_label.set_halign(gtk4::Align::Start);
+    tip_label.set_margin_top(5);
+    settings_box.append(&tip_label);
 
     content.append(&settings_box);
 
