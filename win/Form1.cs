@@ -642,7 +642,7 @@ namespace MakeYourChoice
 
             var rbClear = new RadioButton
             {
-                Text = "Clear out conflicts, and apply selection (Recommended)",
+                Text = "Clear out conflicts, and apply selection (recommended)",
                 AutoSize = true,
                 Location = new Point(15, 125),
                 Checked = true
