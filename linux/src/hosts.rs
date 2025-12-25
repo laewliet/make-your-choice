@@ -208,6 +208,94 @@ impl HostsManager {
         self.write_hosts(default_hosts)?;
         Ok(())
     }
+
+    pub fn get_all_managed_hostnames(&self, regions: &HashMap<String, RegionInfo>) -> HashSet<String> {
+        let mut hostnames = HashSet::new();
+        for region_info in regions.values() {
+            for host in &region_info.hosts {
+                hostnames.insert(host.to_lowercase());
+            }
+        }
+        hostnames
+    }
+
+    pub fn detect_conflicting_entries(&self, regions: &HashMap<String, RegionInfo>) -> Result<Vec<String>> {
+        let mut conflicts = Vec::new();
+        let managed_hosts = self.get_all_managed_hostnames(regions);
+
+        let original = self.read_hosts()?;
+
+        // Find the section markers
+        let first = original.find(SECTION_MARKER);
+        let last = if let Some(pos) = first {
+            original[pos + SECTION_MARKER.len()..].find(SECTION_MARKER)
+                .map(|p| p + pos + SECTION_MARKER.len())
+        } else {
+            None
+        };
+
+        // Get content outside markers
+        let outside_content = match (first, last) {
+            (Some(f), Some(l)) => {
+                // Content before first marker + content after second marker
+                let before = &original[..f];
+                let after = &original[l + SECTION_MARKER.len()..];
+                format!("{}{}", before, after)
+            }
+            (Some(f), None) => {
+                // Only first marker found, take content before it
+                original[..f].to_string()
+            }
+            (None, _) => {
+                // No markers, all content is outside
+                original.clone()
+            }
+        };
+
+        // Parse lines and check for conflicts
+        for line in outside_content.lines() {
+            let trimmed = line.trim();
+
+            // Skip empty lines and commented lines (lines starting with #)
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+
+            // Parse host entry (format: IP hostname)
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() >= 2 {
+                // Check if hostname matches any managed host
+                let hostname = parts[1].to_lowercase();
+                if managed_hosts.contains(&hostname) && !conflicts.contains(&trimmed.to_string()) {
+                    conflicts.push(trimmed.to_string());
+                }
+            }
+        }
+
+        Ok(conflicts)
+    }
+
+    pub fn clear_conflicting_entries(&self, conflicts: &[String]) -> Result<()> {
+        let original = self.read_hosts()?;
+        let conflict_set: HashSet<String> = conflicts.iter().map(|s| s.trim().to_string()).collect();
+
+        // Filter out conflicting lines
+        let cleaned: String = original
+            .lines()
+            .filter(|line| !conflict_set.contains(&line.trim().to_string()))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Add trailing newline if original had one
+        let cleaned = if original.ends_with('\n') {
+            format!("{}\n", cleaned)
+        } else {
+            cleaned
+        };
+
+        self.write_hosts(&cleaned)?;
+        Ok(())
+    }
 }
 
 fn resolve_hostname(hostname: &str) -> Result<String> {

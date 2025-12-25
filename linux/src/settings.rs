@@ -31,7 +31,7 @@ impl UserSettings {
     }
 
     pub fn config_file() -> PathBuf {
-        Self::config_dir().join("settings.json")
+        Self::config_dir().join("config.yaml")
     }
 
     pub fn load() -> Result<Self> {
@@ -43,8 +43,8 @@ impl UserSettings {
         let content = fs::read_to_string(&path)
             .with_context(|| format!("Failed to read settings from {:?}", path))?;
 
-        let settings: UserSettings = serde_json::from_str(&content)
-            .with_context(|| "Failed to parse settings JSON")?;
+        let settings: UserSettings = serde_yaml::from_str(&content)
+            .with_context(|| "Failed to parse settings YAML")?;
 
         Ok(settings)
     }
@@ -57,10 +57,10 @@ impl UserSettings {
         }
 
         let path = Self::config_file();
-        let json = serde_json::to_string_pretty(self)
-            .with_context(|| "Failed to serialize settings to JSON")?;
+        let yaml = serde_yaml::to_string(self)
+            .with_context(|| "Failed to serialize settings to YAML")?;
 
-        fs::write(&path, json)
+        fs::write(&path, yaml)
             .with_context(|| format!("Failed to write settings to {:?}", path))?;
 
         Ok(())

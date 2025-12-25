@@ -26,11 +26,38 @@ use update::UpdateChecker;
 
 const APP_ID: &str = "dev.lawliet.makeyourchoice";
 
+#[derive(Debug, serde::Deserialize)]
+struct PatchNotes {
+    version: String,
+    notes: Vec<String>,
+}
+
+fn load_versinf() -> (String, String) {
+    const VERSINF_YAML: &str = include_str!("../../VERSINF.yaml");
+
+    match serde_yaml::from_str::<PatchNotes>(VERSINF_YAML) {
+        Ok(versinf) => {
+            let version = versinf.version;
+            let notes = versinf.notes
+                .iter()
+                .map(|note| format!("- {}", note))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let message = format!("Here are some new features and changes:\n\n{}", notes);
+            (version, message)
+        }
+        Err(_) => {
+            ("v0.0.0".to_string(), "Failed to get version info.".to_string()) // Return placeholder on error
+        }
+    }
+}
+
 #[derive(Clone)]
 struct AppConfig {
-    repo_url: String,
+    repo_url: Option<String>,
     current_version: String,
-    developer: String,
+    developer: Option<String>,
     repo: String,
     update_message: String,
     discord_url: String,
@@ -103,6 +130,34 @@ fn refresh_warning_symbols(
     }
 }
 
+async fn fetch_git_identity() -> Option<String> {
+    const UID: &str = "109703063"; // Changing this, or the final result of this functionality may break license compliance
+    let url = format!("https://api.github.com/user/{}", UID);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()?;
+
+    match client
+        .get(&url)
+        .header("User-Agent", "make-your-choice")
+        .send()
+        .await
+    {
+        Ok(response) => {
+            if let Ok(json) = response.json::<serde_json::Value>().await {
+                if let Some(login) = json.get("login").and_then(|v| v.as_str()) {
+                    return Some(login.to_string());
+                }
+            }
+        }
+        Err(_) => {}
+    }
+
+    None
+}
+
 fn main() -> glib::ExitCode {
     // Prevent running as root
     if is_running_as_root() {
@@ -125,26 +180,29 @@ fn build_ui(app: &Application) {
     // Create tokio runtime for async operations
     let tokio_runtime = Arc::new(Runtime::new().expect("Failed to create tokio runtime"));
 
+    // Load settings first
+    let settings = Arc::new(Mutex::new(UserSettings::load().unwrap_or_default()));
+
+    // Fetch git identifier from API
+    let developer = tokio_runtime.block_on(async {
+        fetch_git_identity().await
+    });
+
     // Load configuration
+    let (current_version, update_message) = load_versinf();
     let config = AppConfig {
-        repo_url: "https://github.com/laewliet/make-your-choice".to_string(),
-        current_version: "2.1.0".to_string(), // Must match git tag for updates, and Cargo.toml version
-        developer: "laewliet".to_string(), // GitHub username, DO NOT CHANGE, as changing this breaks the license compliance
+        repo_url: developer.as_ref().map(|dev| format!("https://github.com/{}/make-your-choice", dev)),
+        current_version,
+        developer, // Fetched from API
         repo: "make-your-choice".to_string(), // Repository name
-        update_message: "Welcome back! Here are the new features and changes in this version:\n\n\
-                        - Added color coded latency on Linux.\n\
-                        - Improved \"About\" dialog menu.\n\
-                        - Fixed the Discord invite link. (fr)\n\
-                        - Fixed a bug where the *unstable* warning would show at all times on Linux.\n\n\
-                        Thank you for your support!".to_string(),
+        update_message,
         discord_url: "https://discord.gg/xEMyAA8gn8".to_string(),
     };
 
     let regions = get_regions();
-    let settings = Arc::new(Mutex::new(UserSettings::load().unwrap_or_default()));
     let hosts_manager = HostsManager::new(config.discord_url.clone());
     let update_checker = UpdateChecker::new(
-        config.developer.clone(),
+        config.developer.clone().unwrap_or_else(|| "unknown".to_string()),
         config.repo.clone(),
         config.current_version.clone(),
     );
@@ -420,7 +478,7 @@ fn build_ui(app: &Application) {
     // Version menu button
     let version_menu = create_version_menu(&window, &app_state);
     let version_btn = MenuButton::builder()
-        .label(&format!("v{}", config.current_version))
+        .label(&config.current_version)
         .menu_model(&version_menu)
         .build();
 
@@ -536,8 +594,17 @@ fn setup_menu_actions(app: &Application, window: &ApplicationWindow, app_state: 
     // Repository action
     let action = SimpleAction::new("repository", None);
     let repo_url = app_state.config.repo_url.clone();
+    let window_clone = window.clone();
     action.connect_activate(move |_, _| {
-        open_url(&repo_url);
+        if let Some(url) = &repo_url {
+            open_url(url);
+        } else {
+            show_error_dialog(
+                &window_clone,
+                "Repository",
+                "Unable to open repository.\n\nThe application was unable to fetch the git identity and therefore couldn't determine the repository URL."
+            );
+        }
     });
     app.add_action(&action);
 
@@ -597,6 +664,18 @@ fn check_for_updates_action(app_state: &Rc<AppState>, window: &ApplicationWindow
     let update_checker = app_state.update_checker.clone();
     let current_version = app_state.config.current_version.clone();
     let runtime = app_state.tokio_runtime.clone();
+    let repo_url = app_state.config.repo_url.clone();
+
+    // Check if developer identity was fetched
+    if repo_url.is_none() {
+        show_error_dialog(
+            &window,
+            "Check For Updates",
+            "Unable to check for updates.\n\nThe application was unable to fetch the git identity and therefore couldn't determine the repository URL."
+        );
+        return;
+    }
+
     let releases_url = update_checker.get_releases_url();
 
     glib::spawn_future_local(async move {
@@ -615,7 +694,7 @@ fn check_for_updates_action(app_state: &Rc<AppState>, window: &ApplicationWindow
                     "Update Available",
                 );
                 dialog.set_secondary_text(Some(&format!(
-                    "A new version is available: {}.\nWould you like to update?\n\nYour version: {}",
+                    "A new version is available: {}.\nWould you like to visit the repository?\n\nYour version: {}\n\nOn Arch, it is recommended to use your package manager to update.",
                     new_version, current_version
                 )));
 
@@ -645,6 +724,11 @@ fn check_for_updates_action(app_state: &Rc<AppState>, window: &ApplicationWindow
 }
 
 fn check_for_updates_silent(app_state: &Rc<AppState>, window: &ApplicationWindow) {
+    // Don't check silently if developer identity wasn't fetched
+    if app_state.config.repo_url.is_none() {
+        return;
+    }
+
     let window = window.clone();
     let update_checker = app_state.update_checker.clone();
     let current_version = app_state.config.current_version.clone();
@@ -667,7 +751,7 @@ fn check_for_updates_silent(app_state: &Rc<AppState>, window: &ApplicationWindow
                 "Update Available",
             );
             dialog.set_secondary_text(Some(&format!(
-                "A new version is available: {}.\nWould you like to update?\n\nYour version: {}",
+                "A new version is available: {}.\nWould you like to visit the repository?\n\nYour version: {}\n\nOn Arch, it is recommended to use your package manager to update.",
                 new_version, current_version
             )));
 
@@ -713,13 +797,20 @@ fn show_about_dialog(app_state: &Rc<AppState>, window: &ApplicationWindow) {
     let developer_box = GtkBox::new(Orientation::Horizontal, 5);
     developer_box.set_halign(gtk4::Align::Start);
     let developer_label = Label::new(Some("Developer: "));
-    let developer_link = gtk4::LinkButton::with_label(
-        &format!("https://github.com/{}", app_state.config.developer),
-        &app_state.config.developer,
-    );
-    developer_link.set_halign(gtk4::Align::Start);
     developer_box.append(&developer_label);
-    developer_box.append(&developer_link);
+
+    if let Some(dev) = &app_state.config.developer {
+        let developer_link = gtk4::LinkButton::with_label(
+            &format!("https://github.com/{}", dev),
+            dev,
+        );
+        developer_link.set_halign(gtk4::Align::Start);
+        developer_box.append(&developer_link);
+    } else {
+        let unknown_label = Label::new(Some("(unknown)"));
+        unknown_label.set_halign(gtk4::Align::Start);
+        developer_box.append(&unknown_label);
+    }
 
     let version = Label::new(Some(&format!(
         "Version {}\nLinux (GTK4)",
@@ -790,16 +881,142 @@ fn reset_hosts_action(app_state: &Rc<AppState>, window: &ApplicationWindow) {
     });
 }
 
-fn handle_apply_click(app_state: &Rc<AppState>, window: &ApplicationWindow) {
-    let selected = app_state.selected_regions.borrow().clone();
-    let settings = app_state.settings.lock().unwrap();
+fn show_conflict_dialog(
+    window: &ApplicationWindow,
+    app_state: &Rc<AppState>,
+    selected: &HashSet<String>,
+    settings: &std::sync::MutexGuard<UserSettings>,
+) {
+    let dialog = Dialog::with_buttons(
+        Some("Conflicting Hosts Entries Detected"),
+        Some(window),
+        gtk4::DialogFlags::MODAL,
+        &[
+            ("Cancel", ResponseType::Cancel),
+            ("Continue", ResponseType::Ok),
+        ],
+    );
+    dialog.set_default_width(500);
+    dialog.set_default_height(280);
 
-    let result = match settings.apply_mode {
+    // Add margin to button area
+    if let Some(action_area) = dialog.child().and_then(|c| c.last_child()) {
+        action_area.set_margin_start(15);
+        action_area.set_margin_end(15);
+        action_area.set_margin_top(10);
+        action_area.set_margin_bottom(15);
+    }
+
+    let content = dialog.content_area();
+    let vbox = GtkBox::new(Orientation::Vertical, 15);
+    vbox.set_margin_start(20);
+    vbox.set_margin_end(20);
+    vbox.set_margin_top(20);
+    vbox.set_margin_bottom(20);
+
+    let message = Label::new(Some(
+        "It seems like there are conflicting entries in your hosts file.\n\n\
+        This is usually caused by another program, or by manual changes.\n\n\
+        It's best to resolve these issues first before applying a new configuration.\n\
+        Would you like to clear out all conflicting entries?"
+    ));
+    message.set_wrap(true);
+    message.set_max_width_chars(60);
+    message.set_halign(gtk4::Align::Start);
+
+    let rb_clear = gtk4::CheckButton::with_label("Clear out conflicts, and apply selection (recommended)");
+    rb_clear.set_active(true);
+
+    let rb_keep = gtk4::CheckButton::with_label("Apply selection without clearing out conflicts");
+    rb_keep.set_group(Some(&rb_clear));
+
+    vbox.append(&message);
+    vbox.append(&rb_clear);
+    vbox.append(&rb_keep);
+    content.append(&vbox);
+
+    let app_state_clone = app_state.clone();
+    let window_clone = window.clone();
+    let selected_clone = selected.clone();
+    let apply_mode = settings.apply_mode;
+    let block_mode = settings.block_mode;
+    let merge_unstable = settings.merge_unstable;
+
+    dialog.connect_response(move |dialog, response| {
+        if response != ResponseType::Ok {
+            dialog.close();
+            return;
+        }
+
+        let clear_conflicts = rb_clear.is_active();
+
+        if !clear_conflicts {
+            // Show confirmation dialog
+            let confirm_dialog = MessageDialog::new(
+                Some(&window_clone),
+                gtk4::DialogFlags::MODAL,
+                MessageType::Warning,
+                ButtonsType::YesNo,
+                "Confirm",
+            );
+            confirm_dialog.set_secondary_text(Some(
+                "Not clearing out conflicting entries will cause unexpected behavior.\n\n\
+                Are you sure you want to continue?"
+            ));
+
+            let app_state_clone2 = app_state_clone.clone();
+            let window_clone2 = window_clone.clone();
+            let selected_clone2 = selected_clone.clone();
+
+            confirm_dialog.run_async(move |confirm_dialog, confirm_response| {
+                if confirm_response == ResponseType::Yes {
+                    // User confirmed, proceed without clearing conflicts
+                    apply_hosts_changes(&app_state_clone2, &window_clone2, &selected_clone2, apply_mode, block_mode, merge_unstable);
+                }
+                confirm_dialog.close();
+            });
+
+            dialog.close();
+        } else {
+            // Clear conflicts first, then apply
+            match app_state_clone.hosts_manager.detect_conflicting_entries(&app_state_clone.regions) {
+                Ok(conflicts) => {
+                    if let Err(e) = app_state_clone.hosts_manager.clear_conflicting_entries(&conflicts) {
+                        show_error_dialog(&window_clone, "Error", &format!("Failed to clear conflicting entries:\n{}", e));
+                        dialog.close();
+                        return;
+                    }
+                }
+                Err(e) => {
+                    show_error_dialog(&window_clone, "Error", &format!("Failed to check for conflicts:\n{}", e));
+                    dialog.close();
+                    return;
+                }
+            }
+
+            // Conflicts cleared, now apply
+            apply_hosts_changes(&app_state_clone, &window_clone, &selected_clone, apply_mode, block_mode, merge_unstable);
+            dialog.close();
+        }
+    });
+
+    dialog.show();
+}
+
+fn apply_hosts_changes(
+    app_state: &Rc<AppState>,
+    window: &ApplicationWindow,
+    selected: &HashSet<String>,
+    apply_mode: ApplyMode,
+    block_mode: BlockMode,
+    merge_unstable: bool,
+) {
+    let result = match apply_mode {
         ApplyMode::Gatekeep => app_state.hosts_manager.apply_gatekeep(
             &app_state.regions,
-            &selected,
-            settings.block_mode,
-            settings.merge_unstable,
+            selected,
+            block_mode,
+            merge_unstable,
         ),
         ApplyMode::UniversalRedirect => {
             if selected.len() != 1 {
@@ -824,7 +1041,7 @@ fn handle_apply_click(app_state: &Rc<AppState>, window: &ApplicationWindow) {
                 "Success",
                 &format!(
                     "The hosts file was updated successfully ({:?} mode).\n\nPlease restart the game for changes to take effect.",
-                    settings.apply_mode
+                    apply_mode
                 ),
             );
         }
@@ -832,6 +1049,33 @@ fn handle_apply_click(app_state: &Rc<AppState>, window: &ApplicationWindow) {
             show_error_dialog(window, "Error", &e.to_string());
         }
     }
+}
+
+fn handle_apply_click(app_state: &Rc<AppState>, window: &ApplicationWindow) {
+    let selected = app_state.selected_regions.borrow().clone();
+    let settings = app_state.settings.lock().unwrap();
+
+    // Check for conflicting entries before proceeding
+    match app_state.hosts_manager.detect_conflicting_entries(&app_state.regions) {
+        Ok(conflicts) if !conflicts.is_empty() => {
+            // Show conflict dialog and let it handle everything
+            show_conflict_dialog(window, app_state, &selected, &settings);
+            return;
+        }
+        Err(e) => {
+            show_error_dialog(window, "Error", &format!("Failed to check for conflicts:\n{}", e));
+            return;
+        }
+        _ => {} // No conflicts, continue
+    }
+
+    // No conflicts, apply directly
+    let apply_mode = settings.apply_mode;
+    let block_mode = settings.block_mode;
+    let merge_unstable = settings.merge_unstable;
+    drop(settings); // Release lock before applying
+
+    apply_hosts_changes(app_state, window, &selected, apply_mode, block_mode, merge_unstable);
 }
 
 fn handle_revert_click(app_state: &Rc<AppState>, window: &ApplicationWindow) {
@@ -881,7 +1125,7 @@ fn show_settings_dialog(app_state: &Rc<AppState>, parent: &ApplicationWindow) {
     mode_label.set_halign(gtk4::Align::Start);
     let mode_combo = ComboBoxText::new();
     mode_combo.append_text("Gatekeep (default)");
-    mode_combo.append_text("Universal Redirect");
+    mode_combo.append_text("Universal Redirect (deprecated)");
 
     let settings = app_state.settings.lock().unwrap();
     mode_combo.set_active(Some(match settings.apply_mode {
@@ -921,6 +1165,17 @@ fn show_settings_dialog(app_state: &Rc<AppState>, parent: &ApplicationWindow) {
     settings_box.append(&rb_service);
     settings_box.append(&Separator::new(Orientation::Horizontal));
     settings_box.append(&merge_check);
+    settings_box.append(&Separator::new(Orientation::Horizontal));
+
+    // Tip label
+    let tip_label = Label::new(Some(
+        "The default options are recommended. You may not want to change these if you aren't sure of what you are doing. Your experience may vary by using settings other than the default."
+    ));
+    tip_label.set_wrap(true);
+    tip_label.set_max_width_chars(40);
+    tip_label.set_halign(gtk4::Align::Start);
+    tip_label.set_margin_top(5);
+    settings_box.append(&tip_label);
 
     content.append(&settings_box);
 
