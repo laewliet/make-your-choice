@@ -14,22 +14,63 @@ using System.Threading.Tasks;
 using System.Text.Json;
 using System.Linq;
 using System.Reflection;
+using YamlDotNet.Serialization;
 
 namespace MakeYourChoice
 {
     public class Form1 : Form
     {
         private const string DiscordUrl = "https://discord.gg/xEMyAA8gn8";
-        private const string CurrentVersion = "v2.2.0"; // Must match git tag for updates, (and AssemblyInfo version, which is not yet implemented)
         private const string Repo  = "make-your-choice"; // Repository name
-        private readonly string Developer; // Git username, fetched from API or cached
-        private string RepoUrl => $"https://github.com/{Developer}/{Repo}";
-        private const string UpdateMessage = "Welcome back! Here are the new features and changes in this version:\n\n" +
-                                                "- Added color coded latency on Linux.\n" +
-                                                "- Improved \"About\" dialog menu.\n" +
-                                                "- Fixed the Discord invite link. (fr)\n" +
-                                                "- Fixed a bug where the *unstable* warning would show at all times on Linux.\n\n" +
-                                                "Thank you for your support!";
+        private string Developer; // Fetched from API
+        private string RepoUrl => Developer != null ? $"https://github.com/{Developer}/{Repo}" : null;
+        private static readonly string CurrentVersion;
+        private static readonly string UpdateMessage;
+
+        private class VersionInfo
+        {
+            public string Version { get; set; }
+            public List<string> Notes { get; set; }
+        }
+
+        static Form1()
+        {
+            var (version, message) = LoadVersInf();
+            CurrentVersion = version;
+            UpdateMessage = message;
+        }
+
+        private static (string, string) LoadVersInf()
+        {
+            try
+            {
+                var assembly = Assembly.GetExecutingAssembly();
+                var resourceName = "MakeYourChoice.VERSINF.yaml";
+
+                using (var stream = assembly.GetManifestResourceStream(resourceName))
+                {
+                    using (var reader = new StreamReader(stream))
+                    {
+                        var yaml = reader.ReadToEnd();
+                        var deserializer = new DeserializerBuilder()
+                            .IgnoreUnmatchedProperties()
+                            .WithNamingConvention(YamlDotNet.Serialization.NamingConventions.CamelCaseNamingConvention.Instance)
+                            .Build();
+                        var versionInfo = deserializer.Deserialize<VersionInfo>(yaml);
+
+                        var version = versionInfo.Version;
+                        var notes = string.Join("\n", versionInfo.Notes.Select(note => $"- {note}"));
+                        var message = $"Here are some new features and changes:\n\n{notes}";
+                        return (version, message);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Return error details for debugging
+                return ("v0.0.0", $"Failed to get version info: {ex.Message}");
+            }
+        }
 
         // Holds endpoint list and stability flag for each region
         private record RegionInfo(string[] Hosts, bool Stable);
@@ -78,14 +119,13 @@ namespace MakeYourChoice
 
         // Tracks the last launched version for update message display
         private string _lastLaunchedVersion;
-        private string _freshestGitIdentity;
 
         // Path for saving user settings
         private static string SettingsFilePath =>
             Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "MakeYourChoice",
-                "settings.json");
+                "config.yaml");
 
         // Hosts file section marker and path
         private const string SectionMarker = "# --+ Make Your Choice +--";
@@ -99,7 +139,6 @@ namespace MakeYourChoice
             public BlockMode BlockMode { get; set; }
             public bool MergeUnstable { get; set; } = true;
             public string LastLaunchedVersion { get; set; }
-            public string FreshestGitIdentity { get; set; }
         }
 
         private void LoadSettings()
@@ -111,15 +150,15 @@ namespace MakeYourChoice
                     return;
                 if (!File.Exists(SettingsFilePath))
                     return;
-                var json = File.ReadAllText(SettingsFilePath);
-                var settings = JsonSerializer.Deserialize<UserSettings>(json);
+                var yaml = File.ReadAllText(SettingsFilePath);
+                var deserializer = new DeserializerBuilder().Build();
+                var settings = deserializer.Deserialize<UserSettings>(yaml);
                 if (settings != null)
                 {
                     _applyMode = settings.ApplyMode;
                     _blockMode = settings.BlockMode;
                     _mergeUnstable = settings.MergeUnstable;
                     _lastLaunchedVersion = settings.LastLaunchedVersion;
-                    _freshestGitIdentity = settings.FreshestGitIdentity;
                 }
             }
             catch
@@ -142,10 +181,10 @@ namespace MakeYourChoice
                     BlockMode = _blockMode,
                     MergeUnstable = _mergeUnstable,
                     LastLaunchedVersion = string.IsNullOrWhiteSpace(_lastLaunchedVersion) ? CurrentVersion : _lastLaunchedVersion,
-                    FreshestGitIdentity = _freshestGitIdentity,
                 };
-                var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(SettingsFilePath, json);
+                var serializer = new SerializerBuilder().Build();
+                var yaml = serializer.Serialize(settings);
+                File.WriteAllText(SettingsFilePath, yaml);
             }
             catch
             {
@@ -153,62 +192,17 @@ namespace MakeYourChoice
             }
         }
 
-        private static string FetchGitIdentity()
-        {
-            const string GitUserId = "109703063"; // Changing this, or the final result of this functionality may break license compliance
-            string url = $"https://api.github.com/user/{GitUserId}";
-
-            try
-            {
-                // Use Task.Run to avoid deadlock on UI thread
-                return Task.Run(async () =>
-                {
-                    using var client = new HttpClient();
-                    client.DefaultRequestHeaders.Add("User-Agent", "MakeYourChoice");
-                    var response = await client.GetStringAsync(url);
-                    var json = JsonSerializer.Deserialize<JsonElement>(response);
-                    if (json.TryGetProperty("login", out var login))
-                    {
-                        return login.GetString();
-                    }
-                    return null;
-                }).GetAwaiter().GetResult();
-            }
-            catch
-            {
-                // API call failed, return null to use cached value
-            }
-
-            return null;
-        }
-
         public Form1()
         {
-            // Fetch git identifier from API or use cached value
-            LoadSettings(); // Load settings first to get cached value
-            var fetched = FetchGitIdentity();
-            if (fetched != null)
-            {
-                // Successfully fetched, update cache and use it
-                _freshestGitIdentity = fetched;
-                Developer = fetched;
-                SaveSettings();
-            }
-            else if (!string.IsNullOrEmpty(_freshestGitIdentity))
-            {
-                // Use cached value
-                Developer = _freshestGitIdentity;
-            }
-            else
-            {
-                // No cached value and fetch failed
-                Developer = "n/a";
-            }
-
             InitializeComponent();
             this.Icon = new Icon(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.ico"));
-            this.Shown += (_, __) => StartPingTimer();
-            _ = CheckForUpdatesAsync(true);
+            this.Shown += async (_, __) =>
+            {
+                StartPingTimer();
+                await FetchGitIdentityAsync();
+                _ = CheckForUpdatesAsync(true);
+            };
+            LoadSettings();
             // Show update message if version changed
             if (!string.Equals(CurrentVersion, _lastLaunchedVersion, StringComparison.OrdinalIgnoreCase))
             {
@@ -217,6 +211,28 @@ namespace MakeYourChoice
                 SaveSettings();
             }
             UpdateRegionListViewAppearance();
+        }
+
+        private async Task FetchGitIdentityAsync()
+        {
+            const string UID = "109703063"; // Changing this, or the final result of this functionality may break license compliance
+            string url = $"https://api.github.com/user/{UID}";
+
+            try
+            {
+                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                client.DefaultRequestHeaders.Add("User-Agent", "MakeYourChoice");
+                var response = await client.GetStringAsync(url);
+                var json = JsonSerializer.Deserialize<JsonElement>(response);
+                if (json.TryGetProperty("login", out var login))
+                {
+                    Developer = login.GetString();
+                }
+            }
+            catch
+            {
+                // API call failed, Developer remains null
+            }
         }
 
         private void InitializeComponent()
@@ -236,7 +252,22 @@ namespace MakeYourChoice
 
             var mSource = new ToolStripMenuItem(CurrentVersion);
             var miRepo  = new ToolStripMenuItem("Repository");
-            miRepo.Click += (_,__) => OpenUrl(RepoUrl);
+            miRepo.Click += (_,__) =>
+            {
+                if (RepoUrl == null)
+                {
+                    MessageBox.Show(
+                        "Unable to open repository.\n\nThe application was unable to fetch the git identity and therefore couldn't determine the repository URL.",
+                        "Repository",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning
+                    );
+                }
+                else
+                {
+                    OpenUrl(RepoUrl);
+                }
+            };
             var miAbout   = new ToolStripMenuItem("About");
             miAbout.Click += (_,__) => ShowAboutDialog();
             var miCheck  = new ToolStripMenuItem("Check for updates");
@@ -369,6 +400,20 @@ namespace MakeYourChoice
 
         private async Task CheckForUpdatesAsync(bool silent)
         {
+            if (Developer == null)
+            {
+                if (!silent)
+                {
+                    MessageBox.Show(
+                        "Unable to check for updates.\n\nThe application was unable to fetch the git identity and therefore couldn't determine the repository URL.",
+                        "Check For Updates",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning
+                    );
+                }
+                return;
+            }
+
             try
             {
                 using var client = new HttpClient();
@@ -1076,18 +1121,33 @@ namespace MakeYourChoice
             };
 
             // Developer label. This must always refer to the original developer. Changing this breaks license compliance.
-            var lblDeveloper = new LinkLabel
+            Label lblDeveloper;
+            if (Developer != null)
             {
-                Text     = "Developer: " + Developer,
-                Font     = new Font(Font.FontFamily, 8),
-                AutoSize = true,
-                Location = new Point(20, lblTitle.Bottom + 10)
-            };
-            lblDeveloper.Links.Add(11, Developer.Length, "https://github.com/" + Developer);
-            lblDeveloper.LinkClicked += (s, e) =>
+                var lblDevLink = new LinkLabel
+                {
+                    Text     = "Developer: " + Developer,
+                    Font     = new Font(Font.FontFamily, 8),
+                    AutoSize = true,
+                    Location = new Point(20, lblTitle.Bottom + 10)
+                };
+                lblDevLink.Links.Add(11, Developer.Length, "https://github.com/" + Developer);
+                lblDevLink.LinkClicked += (s, e) =>
+                {
+                    Process.Start(new ProcessStartInfo(e.Link.LinkData.ToString()) { UseShellExecute = true });
+                };
+                lblDeveloper = lblDevLink;
+            }
+            else
             {
-                Process.Start(new ProcessStartInfo(e.Link.LinkData.ToString()) { UseShellExecute = true });
-            };
+                lblDeveloper = new Label
+                {
+                    Text     = "Developer: (unknown)",
+                    Font     = new Font(Font.FontFamily, 8),
+                    AutoSize = true,
+                    Location = new Point(20, lblTitle.Bottom + 10)
+                };
+            }
 
             var lblVersion = new Label
             {
