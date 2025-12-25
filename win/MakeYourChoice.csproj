@@ -29,5 +29,12 @@
         <Content Include="icon.ico">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </Content>
+        <EmbeddedResource Include="..\VERSINF.yaml">
+            <Link>VERSINF.yaml</Link>
+        </EmbeddedResource>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="YamlDotNet" Version="16.2.1" />
     </ItemGroup>
 </Project>
