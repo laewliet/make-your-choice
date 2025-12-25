@@ -1,0 +1,5 @@
+version: v2.2.0
+notes:
+  - Added conflicting entry detection and handling.
+  - Improved settings menu.
+  - Added various backend improvements.
