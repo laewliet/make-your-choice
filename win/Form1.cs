@@ -221,11 +221,11 @@ namespace MakeYourChoice
 
             try
             {
-                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-                client.DefaultRequestHeaders.Add("User-Agent", "MakeYourChoice");
-                var response = await client.GetStringAsync(url);
-                var json = JsonSerializer.Deserialize<JsonElement>(response);
-                if (json.TryGetProperty("login", out var login))
+                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("MakeYourChoice/1.0");
+                using var stream = await client.GetStreamAsync(url);
+                using var doc = await JsonDocument.ParseAsync(stream);
+                if (doc.RootElement.TryGetProperty("login", out var login))
                 {
                     Developer = login.GetString();
                 }
@@ -445,18 +445,22 @@ namespace MakeYourChoice
             try
             {
                 using var client = new HttpClient();
-                client.DefaultRequestHeaders.Add("User-Agent", "MakeYourChoice");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("MakeYourChoice/1.0");
                 // fetch all releases
                 var url = $"https://api.github.com/repos/{Developer}/{Repo}/releases";
-                var releases = await client.GetFromJsonAsync<List<Release>>(url);
-                if (releases == null || releases.Count == 0)
+                
+                using var stream = await client.GetStreamAsync(url);
+                using var doc = await JsonDocument.ParseAsync(stream);
+                var root = doc.RootElement;
+
+                if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() == 0)
                 {
                     MessageBox.Show("No releases found.", "Check For Updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
 
                 // assume first is latest (API returns newest first)
-                var latest = releases[0].TagName;
+                var latest = root[0].GetProperty("tag_name").GetString();
                 if (string.Equals(latest, CurrentVersion, StringComparison.OrdinalIgnoreCase))
                 {
                     if (!silent)
@@ -490,13 +494,6 @@ namespace MakeYourChoice
                     MessageBoxIcon.Error
                 );
             }
-        }
-
-        // helper DTO for JSON deserialization
-        private class Release
-        {
-            [JsonPropertyName("tag_name")]
-            public string TagName { get; set; }
         }
 
         private void StartPingTimer()
