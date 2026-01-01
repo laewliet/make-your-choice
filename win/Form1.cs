@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using System.Text.Json;
 using System.Linq;
 using System.Reflection;
+using Svg;
 using YamlDotNet.Serialization;
 
 namespace MakeYourChoice
@@ -251,7 +252,25 @@ namespace MakeYourChoice
             _menuStrip = new MenuStrip();
 
             var mSource = new ToolStripMenuItem(CurrentVersion);
+
+            // Load star icon from SVG
+            Bitmap starIcon = null;
+            try
+            {
+                var starSvgPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "star.svg");
+                if (File.Exists(starSvgPath))
+                {
+                    var svgDocument = Svg.SvgDocument.Open(starSvgPath);
+                    starIcon = svgDocument.Draw(16, 16);
+                }
+            }
+            catch { /* ignore */ }
+
             var miRepo  = new ToolStripMenuItem("Repository");
+            if (starIcon != null)
+            {
+                miRepo.Image = starIcon;
+            }
             miRepo.Click += (_,__) =>
             {
                 if (RepoUrl == null)
@@ -265,7 +284,16 @@ namespace MakeYourChoice
                 }
                 else
                 {
-                    OpenUrl(RepoUrl);
+                    var result = MessageBox.Show(
+                        "Pressing \"OK\" will open the project's public repository.\n\nPlease star the repository if you are able to do so as it increases awareness of the project! <3",
+                        "Repository",
+                        MessageBoxButtons.OKCancel,
+                        MessageBoxIcon.Information
+                    );
+                    if (result == DialogResult.OK)
+                    {
+                        OpenUrl(RepoUrl);
+                    }
                 }
             };
             var miAbout   = new ToolStripMenuItem("About");
