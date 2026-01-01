@@ -848,7 +848,7 @@ fn show_about_dialog(app_state: &Rc<AppState>, window: &ApplicationWindow) {
     version.set_halign(gtk4::Align::Start);
 
     // Copyright notice
-    let copyright = Label::new(Some("Copyright © 2025"));
+    let copyright = Label::new(Some("Copyright © 2026"));
     copyright.set_halign(gtk4::Align::Start);
 
     // License information

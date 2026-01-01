@@ -1180,7 +1180,7 @@ namespace MakeYourChoice
 
             var lblVersion = new Label
             {
-                Text     = $"Version {CurrentVersion}\nWindows 7 or higher.",
+                Text     = $"Version {CurrentVersion}\nWindows 10 or higher.",
                 Font     = new Font(Font.FontFamily, 8, FontStyle.Italic),
                 AutoSize = true,
                 Location = new Point(20, lblDeveloper.Bottom + 10)
@@ -1198,7 +1198,7 @@ namespace MakeYourChoice
             // Copyright notice
             var lblCopyright = new Label
             {
-                Text     = "Copyright © 2025",
+                Text     = "Copyright © 2026",
                 Font     = new Font(Font.FontFamily, 8),
                 AutoSize = true,
                 Location = new Point(20, separator.Bottom + 15)
