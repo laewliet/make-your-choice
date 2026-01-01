@@ -75,7 +75,7 @@ pikaur -S make-your-choice
 Clone and install using Makefile:
 ```bash
 cd ~/ && git clone https://github.com/laewliet/make-your-choice.git
-cd make-your-choice/linux && make install
+cd make-your-choice/linux/makefile && make install
 cd ~/ && rm -rf ~/make-your-choice
 ```
 After installation, the clone will be removed.
