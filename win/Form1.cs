@@ -276,7 +276,7 @@ namespace MakeYourChoice
                 if (RepoUrl == null)
                 {
                     MessageBox.Show(
-                        "Unable to open repository.\n\nThe application was unable to fetch the git identity and therefore couldn't determine the repository URL.",
+                        "Unable to open repository.\n\nThe application was unable to fetch the git identity and therefore couldn't determine the repository URL.\n\nThis may be due to network issues or GitHub API issues.\nAn update to fix this issue has most likely been released, please check manually by joining the Discord server or doing a web search.",
                         "Repository",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning
@@ -433,7 +433,7 @@ namespace MakeYourChoice
                 if (!silent)
                 {
                     MessageBox.Show(
-                        "Unable to check for updates.\n\nThe application was unable to fetch the git identity and therefore couldn't determine the repository URL.",
+                        "Unable to check for updates.\n\nThe application was unable to fetch the git identity and therefore couldn't determine the repository URL.\n\nThis may be due to network issues or GitHub API issues.\nAn update to fix this issue has most likely been released, please check manually by joining the Discord server or doing a web search.",
                         "Check For Updates",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning

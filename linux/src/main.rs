@@ -626,7 +626,7 @@ fn setup_menu_actions(app: &Application, window: &ApplicationWindow, app_state: 
             show_error_dialog(
                 &window_clone,
                 "Repository",
-                "Unable to open repository.\n\nThe application was unable to fetch the git identity and therefore couldn't determine the repository URL."
+                "Unable to open repository.\n\nThe application was unable to fetch the git identity and therefore couldn't determine the repository URL.\n\nThis may be due to network issues or GitHub API issues.\nAn update to fix this issue has most likely been released, please check manually by joining the Discord server or doing a web search."
             );
         }
     });
@@ -695,7 +695,7 @@ fn check_for_updates_action(app_state: &Rc<AppState>, window: &ApplicationWindow
         show_error_dialog(
             &window,
             "Check For Updates",
-            "Unable to check for updates.\n\nThe application was unable to fetch the git identity and therefore couldn't determine the repository URL."
+            "Unable to check for updates.\n\nThe application was unable to fetch the git identity and therefore couldn't determine the repository URL.\n\nThis may be due to network issues or GitHub API issues.\nAn update to fix this issue has most likely been released, please check manually by joining the Discord server or doing a web search."
         );
         return;
     }
