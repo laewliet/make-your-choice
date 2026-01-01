@@ -21,7 +21,7 @@ if (Test-Path "bin") {
 
 # Build in release mode with single-file publish
 Write-Host "📦 Building in release mode…" -ForegroundColor Cyan
-dotnet publish "MakeYourChoice.csproj" -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true
+dotnet publish "MakeYourChoice.csproj" -c Release -r win-x64 --self-contained true
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host ""

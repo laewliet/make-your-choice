@@ -23,6 +23,13 @@
 
         <!-- size optimization -->
         <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+        <PublishTrimmed>true</PublishTrimmed>
+        <TrimMode>partial</TrimMode>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <DebuggerSupport>false</DebuggerSupport>
+        <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+        <EventSourceSupport>false</EventSourceSupport>
+        <_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
     </PropertyGroup>
 
     <ItemGroup>
