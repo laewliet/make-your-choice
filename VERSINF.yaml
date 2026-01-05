@@ -1,4 +1,4 @@
-version: v2.3.0
+version: v2.4.0
 notes:
   - Migrated to .NET 10 for Windows
   - Added various binary file size optimizations for Windows
