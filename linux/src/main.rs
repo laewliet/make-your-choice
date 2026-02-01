@@ -818,7 +818,7 @@ fn show_skip_trailer_dialog(app_state: &Rc<AppState>, window: &ApplicationWindow
         Some(window),
         gtk4::DialogFlags::MODAL,
         &[
-            ("Enable", ResponseType::Accept),
+            ("Disable trailer", ResponseType::Accept),
             ("Revert to default", ResponseType::Reject),
             ("Cancel", ResponseType::Cancel),
         ],
@@ -856,13 +856,13 @@ fn show_skip_trailer_dialog(app_state: &Rc<AppState>, window: &ApplicationWindow
                     show_error_dialog(
                         &window_clone,
                         "Skip trailer",
-                        &format!("Failed to enable skip trailer:\n{}", err),
+                        &format!("Failed to disable trailer:\n{}", err),
                     );
                 } else {
                     show_info_dialog(
                         &window_clone,
                         "Skip trailer",
-                        "Loading screen trailer will be skipped.",
+                        "Trailer disabled.",
                     );
                 }
             }

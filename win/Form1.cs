@@ -650,7 +650,7 @@ namespace MakeYourChoice
 
             var lblInfo = new Label
             {
-                Text = "This will automatically skip the current DbD chapter's trailer video that plays everytime you launch the game.\n\nChoose Enable to turn this on, or Revert to restore default.",
+                Text = "This will automatically skip the current DbD chapter's trailer video that plays everytime you launch the game.\n\nChoose Disable trailer to turn this on, or Revert to restore default.",
                 AutoSize = true,
                 MaximumSize = new Size(390, 0),
                 Location = new Point(10, 10)
@@ -658,7 +658,7 @@ namespace MakeYourChoice
 
             var btnEnable = new Button
             {
-                Text = "Enable",
+                Text = "Disable trailer",
                 DialogResult = DialogResult.Yes,
                 AutoSize = true
             };
