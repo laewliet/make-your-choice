@@ -67,6 +67,7 @@ struct AppConfig {
 struct AppState {
     config: AppConfig,
     regions: HashMap<String, RegionInfo>,
+        blocked_regions: HashMap<String, RegionInfo>,
     settings: Arc<Mutex<UserSettings>>,
     hosts_manager: HostsManager,
     update_checker: UpdateChecker,
@@ -200,7 +201,8 @@ fn build_ui(app: &Application) {
         discord_url: "https://discord.gg/xEMyAA8gn8".to_string(),
     };
 
-    let regions = get_regions();
+    let regions = get_selectable_regions();
+        let blocked_regions = get_blocked_regions();
     let hosts_manager = HostsManager::new(config.discord_url.clone());
     let update_checker = UpdateChecker::new(
         config.developer.clone().unwrap_or_else(|| "unknown".to_string()),
@@ -242,7 +244,7 @@ fn build_ui(app: &Application) {
     ]);
 
     // Group regions by category
-    let mut groups: HashMap<&str, Vec<(&String, &RegionInfo)>> = HashMap::new();
+    let mut groups: HashMap<&'static str, Vec<(&String, &RegionInfo)>> = HashMap::new();
     for (region_name, region_info) in &regions {
         let group_name = get_group_name(region_name);
         groups
@@ -402,6 +404,7 @@ fn build_ui(app: &Application) {
     let app_state = Rc::new(AppState {
         config: config.clone(),
         regions: regions.clone(),
+            blocked_regions: blocked_regions.clone(),
         settings: settings.clone(),
         hosts_manager,
         update_checker,
@@ -490,13 +493,6 @@ fn build_ui(app: &Application) {
         .menu_model(&options_menu)
         .build();
 
-    // Extra menu button
-    let extra_menu = create_extra_menu();
-    let extra_btn = MenuButton::builder()
-        .label("Extra")
-        .menu_model(&extra_menu)
-        .build();
-
     // Help menu button
     let help_menu = create_help_menu(&app_state);
     let help_btn = MenuButton::builder()
@@ -509,7 +505,6 @@ fn build_ui(app: &Application) {
 
     menu_box.append(&version_btn);
     menu_box.append(&options_btn);
-    menu_box.append(&extra_btn);
     menu_box.append(&help_btn);
 
     // Tip label
@@ -581,11 +576,6 @@ fn create_version_menu(_window: &ApplicationWindow, _app_state: &Rc<AppState>) -
 fn create_options_menu() -> Menu {
     let menu = Menu::new();
     menu.append(Some("Program settings"), Some("app.settings"));
-    menu
-}
-
-fn create_extra_menu() -> Menu {
-    let menu = Menu::new();
     menu.append(Some("Custom splash art"), Some("app.custom-splash"));
     menu.append(
         Some("Auto-skip loading screen trailer"),
@@ -716,6 +706,12 @@ fn setup_menu_actions(app: &Application, window: &ApplicationWindow, app_state: 
 }
 
 fn show_custom_splash_dialog(app_state: &Rc<AppState>, window: &ApplicationWindow) {
+    let game_path = get_saved_game_path(app_state, window);
+    if game_path.is_none() {
+        return;
+    }
+    let game_path = game_path.unwrap();
+
     let dialog = Dialog::with_buttons(
         Some("Custom splash art"),
         Some(window),
@@ -760,20 +756,14 @@ fn show_custom_splash_dialog(app_state: &Rc<AppState>, window: &ApplicationWindo
     content.append(&info);
 
     let window_clone = window.clone();
-    let app_state_clone = app_state.clone();
     dialog.connect_response(move |dialog, response| {
         dialog.close();
-
-        let game_path = get_saved_game_path(&app_state_clone, &window_clone);
-        if game_path.is_none() {
-            return;
-        }
-        let game_path = game_path.unwrap();
 
         match response {
             ResponseType::Accept => {
                 let window_for_image = window_clone.clone();
                 let window_for_result_inner = window_clone.clone();
+                let game_path = game_path.clone();
                 select_image_file(&window_for_image, move |image_path| {
                     if let Err(err) = apply_custom_splash(&game_path, &image_path) {
                         show_error_dialog(
@@ -817,6 +807,12 @@ fn show_custom_splash_dialog(app_state: &Rc<AppState>, window: &ApplicationWindo
 }
 
 fn show_skip_trailer_dialog(app_state: &Rc<AppState>, window: &ApplicationWindow) {
+    let game_path = get_saved_game_path(app_state, window);
+    if game_path.is_none() {
+        return;
+    }
+    let game_path = game_path.unwrap();
+
     let dialog = Dialog::with_buttons(
         Some("Auto-skip loading screen trailer"),
         Some(window),
@@ -851,15 +847,8 @@ fn show_skip_trailer_dialog(app_state: &Rc<AppState>, window: &ApplicationWindow
     content.append(&description);
 
     let window_clone = window.clone();
-    let app_state_clone = app_state.clone();
     dialog.connect_response(move |dialog, response| {
         dialog.close();
-
-        let game_path = get_saved_game_path(&app_state_clone, &window_clone);
-        if game_path.is_none() {
-            return;
-        }
-        let game_path = game_path.unwrap();
 
         match response {
             ResponseType::Accept => {
@@ -1040,6 +1029,17 @@ fn revert_skip_trailer(game_path: &std::path::Path) -> anyhow::Result<bool> {
 fn open_url(url: &str) {
     // Use the `open` crate for cross-platform URL opening
     let _ = open::that(url);
+}
+
+fn get_all_regions_map(
+    selectable: &HashMap<String, RegionInfo>,
+    blocked: &HashMap<String, RegionInfo>,
+) -> HashMap<String, RegionInfo> {
+    let mut all = selectable.clone();
+    for (k, v) in blocked.iter() {
+        all.insert(k.clone(), v.clone());
+    }
+    all
 }
 
 fn check_for_updates_action(app_state: &Rc<AppState>, window: &ApplicationWindow) {
@@ -1367,7 +1367,9 @@ fn show_conflict_dialog(
             dialog.close();
         } else {
             // Clear conflicts first, then apply
-            match app_state_clone.hosts_manager.detect_conflicting_entries(&app_state_clone.regions) {
+            match app_state_clone.hosts_manager.detect_conflicting_entries(
+                &get_all_regions_map(&app_state_clone.regions, &app_state_clone.blocked_regions),
+            ) {
                 Ok(conflicts) => {
                     if let Err(e) = app_state_clone.hosts_manager.clear_conflicting_entries(&conflicts) {
                         show_error_dialog(&window_clone, "Error", &format!("Failed to clear conflicting entries:\n{}", e));
@@ -1402,6 +1404,7 @@ fn apply_hosts_changes(
     let result = match apply_mode {
         ApplyMode::Gatekeep => app_state.hosts_manager.apply_gatekeep(
             &app_state.regions,
+            &app_state.blocked_regions,
             selected,
             block_mode,
             merge_unstable,
@@ -1418,7 +1421,7 @@ fn apply_hosts_changes(
             let region = selected.iter().next().unwrap();
             app_state
                 .hosts_manager
-                .apply_universal_redirect(&app_state.regions, region)
+                .apply_universal_redirect(&app_state.regions, &app_state.blocked_regions, region)
         }
     };
 
@@ -1444,7 +1447,9 @@ fn handle_apply_click(app_state: &Rc<AppState>, window: &ApplicationWindow) {
     let settings = app_state.settings.lock().unwrap();
 
     // Check for conflicting entries before proceeding
-    match app_state.hosts_manager.detect_conflicting_entries(&app_state.regions) {
+    match app_state.hosts_manager.detect_conflicting_entries(
+        &get_all_regions_map(&app_state.regions, &app_state.blocked_regions),
+    ) {
         Ok(conflicts) if !conflicts.is_empty() => {
             // Show conflict dialog and let it handle everything
             show_conflict_dialog(window, app_state, &selected, &settings);
@@ -1508,24 +1513,6 @@ fn show_settings_dialog(app_state: &Rc<AppState>, parent: &ApplicationWindow) {
     settings_box.set_margin_top(15);
     settings_box.set_margin_bottom(15);
 
-    // Game folder
-    let game_path_label = Label::new(Some("Game folder:"));
-    game_path_label.set_halign(gtk4::Align::Start);
-    let game_path_entry = Entry::new();
-    game_path_entry.set_hexpand(true);
-    let browse_button = Button::with_label("Browse…");
-
-    let game_path_row = GtkBox::new(Orientation::Horizontal, 6);
-    game_path_row.append(&game_path_entry);
-    game_path_row.append(&browse_button);
-
-    let hint_label = Label::new(Some(
-        "Tip: In Steam, right-click Dead by Daylight → Manage → Browse local files.\nThe folder that opens is the one you should select.",
-    ));
-    hint_label.set_wrap(true);
-    hint_label.set_max_width_chars(40);
-    hint_label.set_halign(gtk4::Align::Start);
-
     // Apply mode
     let mode_label = Label::new(Some("Method:"));
     mode_label.set_halign(gtk4::Align::Start);
@@ -1533,12 +1520,18 @@ fn show_settings_dialog(app_state: &Rc<AppState>, parent: &ApplicationWindow) {
     mode_combo.append_text("Gatekeep (default)");
     mode_combo.append_text("Universal Redirect (deprecated)");
 
+    let mode_notice = Label::new(Some(
+        "After changing this setting, reapply your selection to apply changes.",
+    ));
+    mode_notice.set_wrap(true);
+    mode_notice.set_max_width_chars(40);
+    mode_notice.set_halign(gtk4::Align::Start);
+
     let settings = app_state.settings.lock().unwrap();
     mode_combo.set_active(Some(match settings.apply_mode {
         ApplyMode::Gatekeep => 0,
         ApplyMode::UniversalRedirect => 1,
     }));
-    game_path_entry.set_text(&settings.game_path);
 
     // Block mode - using CheckButtons in radio mode
     let block_label = Label::new(Some("Gatekeep Options:"));
@@ -1561,14 +1554,9 @@ fn show_settings_dialog(app_state: &Rc<AppState>, parent: &ApplicationWindow) {
     let merge_check = CheckButton::with_label("Merge unstable servers (recommended)");
     merge_check.set_active(settings.merge_unstable);
 
-    drop(settings);
-
-    settings_box.append(&game_path_label);
-    settings_box.append(&game_path_row);
-    settings_box.append(&hint_label);
-    settings_box.append(&Separator::new(Orientation::Horizontal));
     settings_box.append(&mode_label);
     settings_box.append(&mode_combo);
+    settings_box.append(&mode_notice);
     settings_box.append(&Separator::new(Orientation::Horizontal));
     settings_box.append(&block_label);
     settings_box.append(&rb_both);
@@ -1576,6 +1564,32 @@ fn show_settings_dialog(app_state: &Rc<AppState>, parent: &ApplicationWindow) {
     settings_box.append(&rb_service);
     settings_box.append(&Separator::new(Orientation::Horizontal));
     settings_box.append(&merge_check);
+    settings_box.append(&Separator::new(Orientation::Horizontal));
+
+    // Game folder
+    let game_path_label = Label::new(Some("Game folder:"));
+    game_path_label.set_halign(gtk4::Align::Start);
+    let game_path_entry = Entry::new();
+    game_path_entry.set_hexpand(true);
+    let browse_button = Button::with_label("Browse…");
+
+    let game_path_row = GtkBox::new(Orientation::Horizontal, 6);
+    game_path_row.append(&game_path_entry);
+    game_path_row.append(&browse_button);
+
+    let hint_label = Label::new(Some(
+        "Tip: In Steam, right-click Dead by Daylight → Manage → Browse local files.\nThe folder that opens is the one you should select.\n\nThis setting is only required for some features like custom splash art and auto-skip trailer.",
+    ));
+    hint_label.set_wrap(true);
+    hint_label.set_max_width_chars(40);
+    hint_label.set_halign(gtk4::Align::Start);
+
+    game_path_entry.set_text(&settings.game_path);
+    drop(settings);
+
+    settings_box.append(&game_path_label);
+    settings_box.append(&game_path_row);
+    settings_box.append(&hint_label);
     settings_box.append(&Separator::new(Orientation::Horizontal));
 
     // Tip label

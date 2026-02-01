@@ -99,10 +99,21 @@ namespace MakeYourChoice
 
             // Oceania
             { "Asia Pacific (Sydney)",      new RegionInfo(new[]{ "gamelift.ap-southeast-2.amazonaws.com","gamelift-ping.ap-southeast-2.api.aws" }, true) },
+        };
 
-            // Mainland China
-            { "China (Beijing)",            new RegionInfo(new[]{ "gamelift.cn-north-1.amazonaws.com.cn" }, true) },
-            { "China (Ningxia)",            new RegionInfo(new[]{ "gamelift.cn-northwest-1.amazonaws.com.cn" }, true) },
+        // These regions are always blocked regardless of user choice. DbD doesn't use them so they're not shown in the UI. They are just blocked for stability purposes.
+        private readonly Dictionary<string, RegionInfo> _blockedRegions = new()
+        {
+            { "Africa (Cape Town)",         new RegionInfo(new[]{ "gamelift.af-south-1.amazonaws.com",     "gamelift-ping.af-south-1.api.aws" }, true) },
+            { "Asia Pacific (Osaka)",       new RegionInfo(new[]{ "gamelift.ap-northeast-3.amazonaws.com","gamelift-ping.ap-northeast-3.api.aws" }, true) },
+            { "Europe (Stockholm)",         new RegionInfo(new[]{ "gamelift.eu-north-1.amazonaws.com",    "gamelift-ping.eu-north-1.api.aws" }, true) },
+            { "Europe (Paris)",             new RegionInfo(new[]{ "gamelift.eu-west-3.amazonaws.com",     "gamelift-ping.eu-west-3.api.aws" }, true) },
+            { "Europe (Milan)",             new RegionInfo(new[]{ "gamelift.eu-south-1.amazonaws.com",    "gamelift-ping.eu-south-1.api.aws" }, true) },
+            { "Middle East (Bahrain)",      new RegionInfo(new[]{ "gamelift.me-south-1.amazonaws.com",    "gamelift-ping.me-south-1.api.aws" }, true) },
+            { "Asia Pacific (Malaysia)",    new RegionInfo(new[]{ "gamelift.ap-southeast-5.amazonaws.com", "gamelift-ping.ap-southeast-5.api.aws" }, true) },
+            { "Asia Pacific (Thailand)",    new RegionInfo(new[]{ "gamelift.ap-southeast-7.amazonaws.com", "gamelift-ping.ap-southeast-7.api.aws" }, true) },
+            { "China (Beijing)",            new RegionInfo(new[]{ "gamelift.cn-north-1.amazonaws.com.cn",  "gamelift-ping.cn-north-1.api.aws" }, true) },
+            { "China (Ningxia)",            new RegionInfo(new[]{ "gamelift.cn-northwest-1.amazonaws.com.cn", "gamelift-ping.cn-northwest-1.api.aws" }, true) },
         };
 
         private MenuStrip      _menuStrip;
@@ -328,14 +339,12 @@ namespace MakeYourChoice
             var miSettings = new ToolStripMenuItem("Program settings");
             miSettings.Click += (_,__) => ShowSettingsDialog();
             mOptions.DropDownItems.Add(miSettings);
-
-            var mExtra = new ToolStripMenuItem("Extra");
             var miCustomSplash = new ToolStripMenuItem("Custom splash art");
             miCustomSplash.Click += (_, __) => HandleCustomSplashArt();
             var miSkipTrailer = new ToolStripMenuItem("Auto-skip loading screen trailer");
             miSkipTrailer.Click += (_, __) => HandleSkipTrailer();
-            mExtra.DropDownItems.Add(miCustomSplash);
-            mExtra.DropDownItems.Add(miSkipTrailer);
+            mOptions.DropDownItems.Add(miCustomSplash);
+            mOptions.DropDownItems.Add(miSkipTrailer);
 
             var mHelp     = new ToolStripMenuItem("Help");
             var miDiscord = new ToolStripMenuItem("Discord (Get support)");
@@ -344,7 +353,6 @@ namespace MakeYourChoice
 
             _menuStrip.Items.Add(mSource);
             _menuStrip.Items.Add(mOptions);
-            _menuStrip.Items.Add(mExtra);
             _menuStrip.Items.Add(mHelp);
 
             // ── Tip label ────────────────────────────────────────────────
@@ -445,7 +453,7 @@ namespace MakeYourChoice
             if (string.IsNullOrWhiteSpace(gamePath))
             {
                 MessageBox.Show(
-                    "Please set the game folder in Options → Program settings.\n\nTip: In Steam, right-click Dead by Daylight → Manage → Browse local files. The folder that opens is the one you should select.",
+                    "Please set the game folder in Options → Program settings.\n\nTip: In Steam, right-click Dead by Daylight → Manage → Browse local files. The folder that opens is the one you should select.\n\nThis setting is only required for some features like custom splash art and auto-skip trailer.",
                     "Game folder required",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -848,6 +856,13 @@ namespace MakeYourChoice
                     hostnames.Add(host.ToLowerInvariant());
                 }
             }
+            foreach (var region in _blockedRegions.Values)
+            {
+                foreach (var host in region.Hosts)
+                {
+                    hostnames.Add(host.ToLowerInvariant());
+                }
+            }
             return hostnames.ToList();
         }
 
@@ -1128,6 +1143,16 @@ namespace MakeYourChoice
                         sb.AppendLine();
                     }
 
+                    foreach (var kv in _blockedRegions)
+                    {
+                        var regionHosts = kv.Value.Hosts;
+                        foreach (var h in regionHosts)
+                        {
+                            sb.AppendLine($"0.0.0.0 {h}");
+                        }
+                        sb.AppendLine();
+                    }
+
                     WriteWrappedHostsSection(sb.ToString());
                     try
                     {
@@ -1255,6 +1280,15 @@ namespace MakeYourChoice
                             continue;
                         var prefix = allow ? "#" : "0.0.0.0".PadRight(9);
                         sb.AppendLine($"{prefix} {h}");
+                    }
+                    sb.AppendLine();
+                }
+
+                foreach (var kv in _blockedRegions)
+                {
+                    foreach (var h in kv.Value.Hosts)
+                    {
+                        sb.AppendLine($"0.0.0.0 {h}");
                     }
                     sb.AppendLine();
                 }
@@ -1509,75 +1543,41 @@ namespace MakeYourChoice
                 Text            = "Program Settings",
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 StartPosition   = FormStartPosition.CenterParent,
-                //ClientSize      = new Size(350, 280),
                 MaximizeBox     = false,
                 MinimizeBox     = false,
                 ShowInTaskbar   = false,
-                Padding         = new Padding(10),
+                Padding         = new Padding(18),
                 AutoSize        = true,
                 AutoSizeMode    = AutoSizeMode.GrowAndShrink
             };
-
-            // ── Game folder ────────────────────────────────────────────
-            var gamePanel = new GroupBox
-            {
-                Text = "Game Folder",
-                Location = new Point(10, 10),
-                Size = new Size(320, 90)
-            };
-            var tbGamePath = new TextBox
-            {
-                Location = new Point(8, 22),
-                Width = 230,
-                Text = _gamePath ?? string.Empty
-            };
-            var btnBrowse = new Button
-            {
-                Text = "Browse…",
-                Location = new Point(tbGamePath.Right + 5, 20),
-                AutoSize = true
-            };
-            var lblGameHint = new Label
-            {
-                Text = "Tip: In Steam, right-click Dead by Daylight → Manage → Browse local files. The folder that opens is the one you should select.",
-                AutoSize = true,
-                MaximumSize = new Size(300, 0),
-                Location = new Point(8, tbGamePath.Bottom + 6)
-            };
-            btnBrowse.Click += (_, __) =>
-            {
-                using var dialogFolder = new FolderBrowserDialog
-                {
-                    Description = "Select the game install folder",
-                    UseDescriptionForTitle = true,
-                    ShowNewFolderButton = false
-                };
-                if (dialogFolder.ShowDialog(this) == DialogResult.OK)
-                {
-                    tbGamePath.Text = dialogFolder.SelectedPath;
-                }
-            };
-            gamePanel.Controls.Add(tbGamePath);
-            gamePanel.Controls.Add(btnBrowse);
-            gamePanel.Controls.Add(lblGameHint);
 
             // ── Mode selection ─────────────────────────────────────────
             var modePanel = new GroupBox
             {
                 Text     = "Method",
-                Location = new Point(10, gamePanel.Bottom + 10),
-                Size     = new Size(320, 60)
+                Location = new Point(10, 10),
+                Size     = new Size(330, 110)
             };
             var cbApplyMode = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 Location      = new Point(8, 20),
-                Width         = 300
+                Width         = 310
             };
             // populate mode choices
             cbApplyMode.Items.AddRange(new[] { "Gatekeep (default)", "Universal Redirect (deprecated)" });
             cbApplyMode.SelectedIndex = _applyMode == ApplyMode.UniversalRedirect ? 1 : 0;
             modePanel.Controls.Add(cbApplyMode);
+
+            var lblModeNotice = new Label
+            {
+                Text = "After changing this setting, reapply your selection to apply changes.",
+                AutoSize = true,
+                MaximumSize = new Size(310, 0),
+                Location = new Point(8, cbApplyMode.Bottom + 6)
+            };
+            modePanel.Height = lblModeNotice.Bottom + 32;
+            modePanel.Controls.Add(lblModeNotice);
 
             var blockPanel = new GroupBox
             {
@@ -1647,6 +1647,48 @@ namespace MakeYourChoice
                 }
             };
 
+            // ── Game folder ────────────────────────────────────────────
+            var gamePanel = new GroupBox
+            {
+                Text = "Game Folder",
+                Size = new Size(320, 95)
+            };
+            var tbGamePath = new TextBox
+            {
+                Location = new Point(8, 22),
+                Width = 230,
+                Text = _gamePath ?? string.Empty
+            };
+            var btnBrowse = new Button
+            {
+                Text = "Browse…",
+                Location = new Point(tbGamePath.Right + 5, 20),
+                AutoSize = true
+            };
+            var lblGameHint = new Label
+            {
+                Text = "Tip: In Steam, right-click Dead by Daylight → Manage → Browse local files. The folder that opens is the one you should select.",
+                AutoSize = true,
+                MaximumSize = new Size(300, 0),
+                Location = new Point(8, tbGamePath.Bottom + 6)
+            };
+            btnBrowse.Click += (_, __) =>
+            {
+                using var dialogFolder = new FolderBrowserDialog
+                {
+                    Description = "Select the game install folder",
+                    UseDescriptionForTitle = true,
+                    ShowNewFolderButton = false
+                };
+                if (dialogFolder.ShowDialog(this) == DialogResult.OK)
+                {
+                    tbGamePath.Text = dialogFolder.SelectedPath;
+                }
+            };
+            gamePanel.Controls.Add(tbGamePath);
+            gamePanel.Controls.Add(btnBrowse);
+            gamePanel.Controls.Add(lblGameHint);
+
             // ── Tip label for settings ────────────────────────────────────────
             var lblTipSettings = new Label
             {
@@ -1698,10 +1740,10 @@ namespace MakeYourChoice
             tlpSettings.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             tlpSettings.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            tlpSettings.Controls.Add(gamePanel,      0, 0);
-            tlpSettings.Controls.Add(modePanel,      0, 1);
-            tlpSettings.Controls.Add(blockPanel,     0, 2);
-            tlpSettings.Controls.Add(miscPanel,      0, 3);
+            tlpSettings.Controls.Add(modePanel,      0, 0);
+            tlpSettings.Controls.Add(blockPanel,     0, 1);
+            tlpSettings.Controls.Add(miscPanel,      0, 2);
+            tlpSettings.Controls.Add(gamePanel,      0, 3);
             tlpSettings.Controls.Add(lblTipSettings, 0, 4);
             var buttonPanel = new FlowLayoutPanel
             {
