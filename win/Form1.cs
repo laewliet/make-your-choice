@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using System.Text.Json;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Svg;
 using YamlDotNet.Serialization;
 
@@ -21,6 +22,9 @@ namespace MakeYourChoice
 {
     public class Form1 : Form
     {
+        [DllImport("uxtheme.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
+        private static extern int SetWindowTheme(IntPtr hwnd, string pszSubAppName, string pszSubIdList);
+
         private const string DiscordUrl = "https://discord.gg/xEMyAA8gn8";
         private const string Repo  = "make-your-choice"; // Repository name
         private string Developer; // Fetched from API
@@ -129,6 +133,7 @@ namespace MakeYourChoice
         private BlockMode _blockMode = BlockMode.Both;
         private bool _mergeUnstable = true;
         private string _gamePath;
+        private bool _darkMode = false;
 
         // Tracks the last launched version for update message display
         private string _lastLaunchedVersion;
@@ -155,6 +160,7 @@ namespace MakeYourChoice
             public string LastLaunchedVersion { get; set; }
             public string GamePath { get; set; }
             public string AutoUpdateCheckPausedUntil { get; set; }
+            public bool DarkMode { get; set; }
         }
 
         private void LoadSettings()
@@ -177,12 +183,15 @@ namespace MakeYourChoice
                     _lastLaunchedVersion = settings.LastLaunchedVersion;
                     _gamePath = settings.GamePath;
                     _autoUpdateCheckPausedUntil = settings.AutoUpdateCheckPausedUntil;
+                    _darkMode = settings.DarkMode;
                 }
             }
             catch
             {
                 // ignore load errors
             }
+            // Apply theme after loading
+            ApplyTheme();
             UpdateRegionListViewAppearance();
         }
 
@@ -201,6 +210,7 @@ namespace MakeYourChoice
                     LastLaunchedVersion = string.IsNullOrWhiteSpace(_lastLaunchedVersion) ? CurrentVersion : _lastLaunchedVersion,
                     GamePath = _gamePath,
                     AutoUpdateCheckPausedUntil = _autoUpdateCheckPausedUntil,
+                    DarkMode = _darkMode,
                 };
                 var serializer = new SerializerBuilder().Build();
                 var yaml = serializer.Serialize(settings);
@@ -209,6 +219,79 @@ namespace MakeYourChoice
             catch
             {
                 // ignore save errors
+            }
+        }
+
+        private class DarkModeColorTable : ProfessionalColorTable
+        {
+            public override Color MenuItemSelected => Color.FromArgb(60, 60, 60);
+            public override Color MenuItemBorder => Color.FromArgb(60, 60, 60);
+            public override Color MenuBorder => Color.FromArgb(60, 60, 60);
+            public override Color MenuItemPressedGradientBegin => Color.FromArgb(45, 45, 48);
+            public override Color MenuItemPressedGradientEnd => Color.FromArgb(45, 45, 48);
+            public override Color MenuItemSelectedGradientBegin => Color.FromArgb(60, 60, 60);
+            public override Color MenuItemSelectedGradientEnd => Color.FromArgb(60, 60, 60);
+            public override Color ToolStripDropDownBackground => Color.FromArgb(32, 32, 32);
+            public override Color ImageMarginGradientBegin => Color.FromArgb(32, 32, 32);
+            public override Color ImageMarginGradientMiddle => Color.FromArgb(32, 32, 32);
+            public override Color ImageMarginGradientEnd => Color.FromArgb(32, 32, 32);
+        }
+
+        private void ApplyTheme()
+        {
+            var darkBack = Color.FromArgb(32, 32, 32);
+            var darkFore = Color.FromArgb(240, 240, 240);
+            var darkControl = Color.FromArgb(45, 45, 48);
+            var darkListBack = Color.FromArgb(25, 25, 25);
+
+            var backColor = _darkMode ? darkBack : SystemColors.Control;
+            var foreColor = _darkMode ? darkFore : SystemColors.ControlText;
+            var btnBack = _darkMode ? darkControl : SystemColors.Control;
+            var btnFore = _darkMode ? darkFore : SystemColors.ControlText;
+
+            this.BackColor = backColor;
+            this.ForeColor = foreColor;
+
+            if (_lv != null)
+            {
+                _lv.BackColor = _darkMode ? darkListBack : SystemColors.Window;
+                _lv.ForeColor = _darkMode ? darkFore : SystemColors.WindowText;
+                try { SetWindowTheme(_lv.Handle, _darkMode ? "DarkMode_Explorer" : "Explorer", null); } catch { }
+            }
+
+            if (_menuStrip != null)
+            {
+                _menuStrip.BackColor = backColor;
+                _menuStrip.ForeColor = foreColor;
+                if (_darkMode)
+                    _menuStrip.Renderer = new ToolStripProfessionalRenderer(new DarkModeColorTable());
+                else
+                    _menuStrip.RenderMode = ToolStripRenderMode.ManagerRenderMode;
+
+                foreach (ToolStripItem item in _menuStrip.Items)
+                {
+                    item.BackColor = backColor;
+                    item.ForeColor = foreColor;
+                    if (item is ToolStripMenuItem mi)
+                    {
+                        foreach (ToolStripItem sub in mi.DropDownItems)
+                        {
+                            sub.BackColor = backColor;
+                            sub.ForeColor = foreColor;
+                        }
+                    }
+                }
+            }
+
+            foreach (var btn in new[] { _btnApply, _btnRevert })
+            {
+                if (btn != null)
+                {
+                    btn.BackColor = btnBack;
+                    btn.ForeColor = btnFore;
+                    btn.FlatStyle = _darkMode ? FlatStyle.Flat : FlatStyle.Standard;
+                    if (_darkMode) btn.FlatAppearance.BorderColor = Color.FromArgb(100, 100, 100);
+                }
             }
         }
 
@@ -1574,7 +1657,7 @@ namespace MakeYourChoice
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 1,
-                RowCount = 5,
+                RowCount = 6,
                 Padding = new Padding(0)
             };
 
@@ -1689,6 +1772,33 @@ namespace MakeYourChoice
             };
 
 
+            // ── Experimental ──────────────────────────────────────────
+            var experimentalPanel = new GroupBox
+            {
+                Text = "Experimental",
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(10),
+                Dock = DockStyle.Fill
+            };
+            var tlpExperimental = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 1
+            };
+            var cbDarkMode = new CheckBox
+            {
+                Text = "Use dark mode",
+                AutoSize = true,
+                Checked = _darkMode,
+                Margin = new Padding(3, 5, 3, 3)
+            };
+            tlpExperimental.Controls.Add(cbDarkMode, 0, 0);
+            experimentalPanel.Controls.Add(tlpExperimental);
+
             // ── Game folder ────────────────────────────────────────────
             var gamePanel = new GroupBox
             {
@@ -1794,6 +1904,7 @@ namespace MakeYourChoice
                 rbBoth.Checked = true;
                 cbMergeUnstable.Checked = true;
                 tbGamePath.Text = string.Empty;
+                cbDarkMode.Checked = false;
             };
             buttonPanel.Controls.Add(btnOk);
             buttonPanel.Controls.Add(btnDefault);
@@ -1801,12 +1912,61 @@ namespace MakeYourChoice
 
             tlpMain.Controls.Add(modePanel, 0, 0);
             tlpMain.Controls.Add(blockPanel, 0, 1);
-            tlpMain.Controls.Add(gamePanel, 0, 2);
-            tlpMain.Controls.Add(lblTipSettings, 0, 3);
-            tlpMain.Controls.Add(buttonPanel, 0, 4);
+            tlpMain.Controls.Add(experimentalPanel, 0, 2);
+            tlpMain.Controls.Add(gamePanel, 0, 3);
+            tlpMain.Controls.Add(lblTipSettings, 0, 4);
+            tlpMain.Controls.Add(buttonPanel, 0, 5);
 
             dialog.Controls.Add(tlpMain);
             dialog.AcceptButton = btnOk;
+
+            // Apply theme to controls
+            Action<Control> themeControl = null;
+            themeControl = (c) =>
+            {
+                if (_darkMode)
+                {
+                    c.BackColor = Color.FromArgb(32, 32, 32);
+                    c.ForeColor = Color.FromArgb(240, 240, 240);
+                }
+                
+                foreach (Control child in c.Controls)
+                {
+                    if (child is Button btn)
+                    {
+                         if (_darkMode)
+                         {
+                             btn.BackColor = Color.FromArgb(45, 45, 48);
+                             btn.ForeColor = Color.FromArgb(240, 240, 240);
+                             btn.FlatStyle = FlatStyle.Flat;
+                             btn.FlatAppearance.BorderColor = Color.FromArgb(100, 100, 100);
+                         }
+                    }
+                    else if (child is TextBox tb)
+                    {
+                        if (_darkMode)
+                        {
+                             tb.BackColor = Color.FromArgb(45, 45, 48);
+                             tb.ForeColor = Color.FromArgb(240, 240, 240);
+                             tb.BorderStyle = BorderStyle.FixedSingle;
+                        }
+                    }
+                     else if (child is ComboBox cb)
+                    {
+                        if (_darkMode)
+                        {
+                             cb.BackColor = Color.FromArgb(45, 45, 48);
+                             cb.ForeColor = Color.FromArgb(240, 240, 240);
+                             cb.FlatStyle = FlatStyle.Flat;
+                        }
+                    }
+                    else
+                    {
+                        themeControl(child);
+                    }
+                }
+            };
+            themeControl(dialog);
 
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
@@ -1834,7 +1994,9 @@ namespace MakeYourChoice
                 }
                 _mergeUnstable = cbMergeUnstable.Checked;
                 _gamePath = gamePathText;
+                _darkMode = cbDarkMode.Checked;
                 SaveSettings();
+                ApplyTheme();
                 UpdateRegionListViewAppearance();
             }
         }
