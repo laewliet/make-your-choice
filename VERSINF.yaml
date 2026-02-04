@@ -1,6 +1,4 @@
-version: v2.4.0
+version: v2.4.1
 notes:
-  -  Added an option to set a custom splash screen image when launching Dead by Daylight.
-  -  Added an option to automatically skip the chapter trailer after loading the game.
-  -  Added an option in settings to set a game folder for Dead by Daylight.
-  -  Reworked the endpoints for some regions.
+  - Update popup now lets you deffer updates for 3, 14, or 21 days.
+  - Experimental dark mode for Windows.
