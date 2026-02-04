@@ -25,6 +25,30 @@ namespace MakeYourChoice
         [DllImport("uxtheme.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
         private static extern int SetWindowTheme(IntPtr hwnd, string pszSubAppName, string pszSubIdList);
 
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("uxtheme.dll", EntryPoint = "#133")]
+        private static extern bool AllowDarkModeForWindow(IntPtr hWnd, bool allow);
+
+        [DllImport("uxtheme.dll", EntryPoint = "#135")]
+        private static extern int SetPreferredAppMode(PreferredAppMode preferredAppMode);
+
+        private enum PreferredAppMode
+        {
+            Default = 0,
+            AllowDark = 1,
+            ForceDark = 2,
+            ForceLight = 3,
+            Max = 4
+        }
+
+        private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+        private const int LVM_GETHEADER = 0x101F;
+
         private const string DiscordUrl = "https://discord.gg/xEMyAA8gn8";
         private const string Repo  = "make-your-choice"; // Repository name
         private string Developer; // Fetched from API
@@ -239,58 +263,41 @@ namespace MakeYourChoice
 
         private void ApplyTheme()
         {
-            var darkBack = Color.FromArgb(32, 32, 32);
-            var darkFore = Color.FromArgb(240, 240, 240);
-            var darkControl = Color.FromArgb(45, 45, 48);
-            var darkListBack = Color.FromArgb(25, 25, 25);
+            // Force preferred app mode (2 = Dark, 3 = Light) to ignore system settings if needed
+            SetPreferredAppMode(_darkMode ? PreferredAppMode.ForceDark : PreferredAppMode.ForceLight);
+            
+            Application.SetColorMode(_darkMode ? SystemColorMode.Dark : SystemColorMode.Classic);
+            AllowDarkModeForWindow(this.Handle, _darkMode);
+            SendMessage(this.Handle, 0x0085, IntPtr.Zero, IntPtr.Zero); // WM_NCPAINT
+            
+            ApplyDarkThemeRefinements(this);
+            Refresh();
+        }
 
-            var backColor = _darkMode ? darkBack : SystemColors.Control;
-            var foreColor = _darkMode ? darkFore : SystemColors.ControlText;
-            var btnBack = _darkMode ? darkControl : SystemColors.Control;
-            var btnFore = _darkMode ? darkFore : SystemColors.ControlText;
-
-            this.BackColor = backColor;
-            this.ForeColor = foreColor;
-
-            if (_lv != null)
+        private void ApplyDarkThemeRefinements(Control container)
+        {
+            foreach (Control c in container.Controls)
             {
-                _lv.BackColor = _darkMode ? darkListBack : SystemColors.Window;
-                _lv.ForeColor = _darkMode ? darkFore : SystemColors.WindowText;
-                try { SetWindowTheme(_lv.Handle, _darkMode ? "DarkMode_Explorer" : "Explorer", null); } catch { }
-            }
-
-            if (_menuStrip != null)
-            {
-                _menuStrip.BackColor = backColor;
-                _menuStrip.ForeColor = foreColor;
-                if (_darkMode)
-                    _menuStrip.Renderer = new ToolStripProfessionalRenderer(new DarkModeColorTable());
-                else
-                    _menuStrip.RenderMode = ToolStripRenderMode.ManagerRenderMode;
-
-                foreach (ToolStripItem item in _menuStrip.Items)
+                if (c is Button btn)
                 {
-                    item.BackColor = backColor;
-                    item.ForeColor = foreColor;
-                    if (item is ToolStripMenuItem mi)
-                    {
-                        foreach (ToolStripItem sub in mi.DropDownItems)
-                        {
-                            sub.BackColor = backColor;
-                            sub.ForeColor = foreColor;
-                        }
-                    }
-                }
-            }
-
-            foreach (var btn in new[] { _btnApply, _btnRevert })
-            {
-                if (btn != null)
-                {
-                    btn.BackColor = btnBack;
-                    btn.ForeColor = btnFore;
                     btn.FlatStyle = _darkMode ? FlatStyle.Flat : FlatStyle.Standard;
-                    if (_darkMode) btn.FlatAppearance.BorderColor = Color.FromArgb(100, 100, 100);
+                }
+                else if (c is ListView lv)
+                {
+                    SetWindowTheme(lv.Handle, "Explorer", null);
+                }
+                else if (c is CheckBox cb)
+                {
+                     cb.FlatStyle = _darkMode ? FlatStyle.Flat : FlatStyle.Standard;
+                }
+                else if (c is RadioButton rb)
+                {
+                     rb.FlatStyle = _darkMode ? FlatStyle.Flat : FlatStyle.Standard;
+                }
+                
+                if (c.HasChildren)
+                {
+                    ApplyDarkThemeRefinements(c);
                 }
             }
         }
@@ -306,6 +313,7 @@ namespace MakeYourChoice
                 _ = CheckForUpdatesAsync(true);
             };
             LoadSettings();
+            ApplyTheme();
             // Show update message if version changed
             if (!string.Equals(CurrentVersion, _lastLaunchedVersion, StringComparison.OrdinalIgnoreCase))
             {
@@ -841,6 +849,7 @@ namespace MakeYourChoice
                 else
                 {
                     using var prompt = new UpdatePrompt(latest, CurrentVersion);
+                    ApplyDarkThemeRefinements(prompt);
                     if (prompt.ShowDialog(this) == DialogResult.OK)
                     {
                         if (prompt.SelectedAction == UpdatePrompt.ValidUpdateAction.UpdateNow)
@@ -1133,6 +1142,8 @@ namespace MakeYourChoice
             dialog.Controls.Add(btnCancel);
             dialog.AcceptButton = btnContinue;
             dialog.CancelButton = btnCancel;
+
+            ApplyDarkThemeRefinements(dialog);
 
             var result = dialog.ShowDialog(this);
             if (result != DialogResult.OK)
@@ -1634,6 +1645,7 @@ namespace MakeYourChoice
             about.Controls.Add(lblLicense);
             about.Controls.Add(btnOk);
             about.AcceptButton = btnOk;
+            ApplyDarkThemeRefinements(about);
             about.ShowDialog(this);
         }
         private void ShowSettingsDialog()
@@ -1920,53 +1932,7 @@ namespace MakeYourChoice
             dialog.Controls.Add(tlpMain);
             dialog.AcceptButton = btnOk;
 
-            // Apply theme to controls
-            Action<Control> themeControl = null;
-            themeControl = (c) =>
-            {
-                if (_darkMode)
-                {
-                    c.BackColor = Color.FromArgb(32, 32, 32);
-                    c.ForeColor = Color.FromArgb(240, 240, 240);
-                }
-                
-                foreach (Control child in c.Controls)
-                {
-                    if (child is Button btn)
-                    {
-                         if (_darkMode)
-                         {
-                             btn.BackColor = Color.FromArgb(45, 45, 48);
-                             btn.ForeColor = Color.FromArgb(240, 240, 240);
-                             btn.FlatStyle = FlatStyle.Flat;
-                             btn.FlatAppearance.BorderColor = Color.FromArgb(100, 100, 100);
-                         }
-                    }
-                    else if (child is TextBox tb)
-                    {
-                        if (_darkMode)
-                        {
-                             tb.BackColor = Color.FromArgb(45, 45, 48);
-                             tb.ForeColor = Color.FromArgb(240, 240, 240);
-                             tb.BorderStyle = BorderStyle.FixedSingle;
-                        }
-                    }
-                     else if (child is ComboBox cb)
-                    {
-                        if (_darkMode)
-                        {
-                             cb.BackColor = Color.FromArgb(45, 45, 48);
-                             cb.ForeColor = Color.FromArgb(240, 240, 240);
-                             cb.FlatStyle = FlatStyle.Flat;
-                        }
-                    }
-                    else
-                    {
-                        themeControl(child);
-                    }
-                }
-            };
-            themeControl(dialog);
+            ApplyDarkThemeRefinements(dialog);
 
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
@@ -2192,4 +2158,5 @@ namespace MakeYourChoice
             }
         }
     }
+
 }
