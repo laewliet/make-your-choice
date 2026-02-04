@@ -1,4 +1,4 @@
 version: v2.4.1
 notes:
-  - Update popup now lets you deffer updates for 3, 14, or 21 days.
+  - Update popup now lets you deffer/pause update notifications.
   - Experimental dark mode for Windows.
