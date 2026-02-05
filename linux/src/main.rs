@@ -499,6 +499,7 @@ fn build_ui(app: &Application) {
     let connected_box = GtkBox::new(Orientation::Horizontal, 5);
     connected_box.set_margin_start(10);
     connected_box.set_margin_end(10);
+    connected_box.set_margin_top(8);
     
     let connection_dot = Label::builder()
         .label("◉")
