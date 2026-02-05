@@ -50,7 +50,7 @@ namespace MakeYourChoice
         private const int LVM_GETHEADER = 0x101F;
 
         private const string DiscordUrl = "https://discord.gg/xEMyAA8gn8";
-        private const string Repo  = "make-your-choice"; // Repository name
+        private const string Repo = "make-your-choice"; // Repository name
         private string Developer; // Fetched from API
         private string RepoUrl => Developer != null ? $"https://github.com/{Developer}/{Repo}" : null;
         private static readonly string CurrentVersion;
@@ -144,13 +144,13 @@ namespace MakeYourChoice
             { "China (Ningxia)",            new RegionInfo(new[]{ "gamelift.cn-northwest-1.amazonaws.com.cn", "gamelift-ping.cn-northwest-1.api.aws" }, true) },
         };
 
-        private MenuStrip      _menuStrip;
-        private Label           _lblTip;
-        private ListView        _lv;
+        private MenuStrip _menuStrip;
+        private Label _lblTip;
+        private ListView _lv;
         private FlowLayoutPanel _buttonPanel;
-        private Button          _btnApply;
-        private Button          _btnRevert;
-        private Timer           _pingTimer;
+        private Button _btnApply;
+        private Button _btnRevert;
+        private Timer _pingTimer;
         private enum ApplyMode { Gatekeep, UniversalRedirect }
         private ApplyMode _applyMode = ApplyMode.Gatekeep;
         private enum BlockMode { Both, OnlyPing, OnlyService }
@@ -158,6 +158,9 @@ namespace MakeYourChoice
         private bool _mergeUnstable = true;
         private string _gamePath;
         private bool _darkMode = false;
+        private Label _lblServerInfo;
+        private TrafficSniffer _sniffer;
+        private const string FirewallRuleName = "MakeYourChoice_Sniffer";
 
         // Tracks the last launched version for update message display
         private string _lastLaunchedVersion;
@@ -265,11 +268,11 @@ namespace MakeYourChoice
         {
             // Force preferred app mode (2 = Dark, 3 = Light) to ignore system settings if needed
             SetPreferredAppMode(_darkMode ? PreferredAppMode.ForceDark : PreferredAppMode.ForceLight);
-            
+
             Application.SetColorMode(_darkMode ? SystemColorMode.Dark : SystemColorMode.Classic);
             AllowDarkModeForWindow(this.Handle, _darkMode);
             SendMessage(this.Handle, 0x0085, IntPtr.Zero, IntPtr.Zero); // WM_NCPAINT
-            
+
             ApplyDarkThemeRefinements(this);
             Refresh();
         }
@@ -288,13 +291,13 @@ namespace MakeYourChoice
                 }
                 else if (c is CheckBox cb)
                 {
-                     cb.FlatStyle = _darkMode ? FlatStyle.Flat : FlatStyle.Standard;
+                    cb.FlatStyle = _darkMode ? FlatStyle.Flat : FlatStyle.Standard;
                 }
                 else if (c is RadioButton rb)
                 {
-                     rb.FlatStyle = _darkMode ? FlatStyle.Flat : FlatStyle.Standard;
+                    rb.FlatStyle = _darkMode ? FlatStyle.Flat : FlatStyle.Standard;
                 }
-                
+
                 if (c.HasChildren)
                 {
                     ApplyDarkThemeRefinements(c);
@@ -323,6 +326,31 @@ namespace MakeYourChoice
                 SaveSettings();
             }
             UpdateRegionListViewAppearance();
+
+            _sniffer = new TrafficSniffer();
+            _sniffer.TrafficDetected += (ip, port) =>
+            {
+                if (this.IsHandleCreated)
+                {
+                    this.BeginInvoke(new Action(() => UpdateServerInfo(ip, port)));
+                }
+            };
+
+            this.Load += (s, e) =>
+            {
+                AddFirewallRules();
+                _sniffer.Start();
+                if (_sniffer.ListeningIP != null)
+                {
+                    _lblServerInfo.Text = $"Sniffing on {(_sniffer.ListeningIP)}... (waiting for traffic)";
+                }
+            };
+
+            this.FormClosing += (s, e) =>
+            {
+                _sniffer.Stop();
+                RemoveFirewallRules();
+            };
         }
 
         private async Task FetchGitIdentityAsync()
@@ -347,17 +375,56 @@ namespace MakeYourChoice
             }
         }
 
+        private void UpdateServerInfo(string ip, int port)
+        {
+            _lblServerInfo.Text = $"Current Match Server: {ip}:{port}";
+        }
+
+        private void AddFirewallRules()
+        {
+            try
+            {
+                string exePath = Process.GetCurrentProcess().MainModule.FileName;
+                RunNetsh($"advfirewall firewall add rule name=\"{FirewallRuleName}\" dir=in action=allow program=\"{exePath}\" enable=yes");
+                RunNetsh($"advfirewall firewall add rule name=\"{FirewallRuleName}\" dir=out action=allow program=\"{exePath}\" enable=yes");
+            }
+            catch { /* ignore */ }
+        }
+
+        private void RemoveFirewallRules()
+        {
+            try
+            {
+                RunNetsh($"advfirewall firewall delete rule name=\"{FirewallRuleName}\"");
+            }
+            catch { /* ignore */ }
+        }
+
+        private void RunNetsh(string args)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("netsh", args)
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                })?.WaitForExit();
+            }
+            catch { /* ignore */ }
+        }
+
         private void InitializeComponent()
         {
             // ── Form setup ────────────────────────────────────────────────
-            Text            = "Make Your Choice (DbD Server Selector)";
-            Width           = 405;
-            Height          = 585;
-            StartPosition   = FormStartPosition.CenterScreen;
-            Padding         = new Padding(10);
+            Text = "Make Your Choice (DbD Server Selector)";
+            Width = 405;
+            Height = 585;
+            StartPosition = FormStartPosition.CenterScreen;
+            Padding = new Padding(10);
             FormBorderStyle = FormBorderStyle.Sizable;
-            MinimumSize     = new Size(Width, 300);
-            MaximumSize     = new Size(Width, Screen.PrimaryScreen.WorkingArea.Height);
+            MinimumSize = new Size(Width, 300);
+            MaximumSize = new Size(Width, Screen.PrimaryScreen.WorkingArea.Height);
 
             // ── MenuStrip ────────────────────────────────────────────────
             _menuStrip = new MenuStrip();
@@ -377,12 +444,12 @@ namespace MakeYourChoice
             }
             catch { /* ignore */ }
 
-            var miRepo  = new ToolStripMenuItem("Repository");
+            var miRepo = new ToolStripMenuItem("Repository");
             if (starIcon != null)
             {
                 miRepo.Image = starIcon;
             }
-            miRepo.Click += (_,__) =>
+            miRepo.Click += (_, __) =>
             {
                 if (RepoUrl == null)
                 {
@@ -407,10 +474,10 @@ namespace MakeYourChoice
                     }
                 }
             };
-            var miAbout   = new ToolStripMenuItem("About");
-            miAbout.Click += (_,__) => ShowAboutDialog();
-            var miCheck  = new ToolStripMenuItem("Check for updates");
-            miCheck.Click += async (_,__) => await CheckForUpdatesAsync(false);
+            var miAbout = new ToolStripMenuItem("About");
+            miAbout.Click += (_, __) => ShowAboutDialog();
+            var miCheck = new ToolStripMenuItem("Check for updates");
+            miCheck.Click += async (_, __) => await CheckForUpdatesAsync(false);
             var miOpenHostsFolder = new ToolStripMenuItem("Open hosts file location");
             miOpenHostsFolder.Click += (_, __) =>
             {
@@ -433,7 +500,7 @@ namespace MakeYourChoice
 
             var mOptions = new ToolStripMenuItem("Options");
             var miSettings = new ToolStripMenuItem("Program settings");
-            miSettings.Click += (_,__) => ShowSettingsDialog();
+            miSettings.Click += (_, __) => ShowSettingsDialog();
             mOptions.DropDownItems.Add(miSettings);
             var miCustomSplash = new ToolStripMenuItem("Custom splash art");
             miCustomSplash.Click += (_, __) => HandleCustomSplashArt();
@@ -442,9 +509,9 @@ namespace MakeYourChoice
             mOptions.DropDownItems.Add(miCustomSplash);
             mOptions.DropDownItems.Add(miSkipTrailer);
 
-            var mHelp     = new ToolStripMenuItem("Help");
+            var mHelp = new ToolStripMenuItem("Help");
             var miDiscord = new ToolStripMenuItem("Discord (Get support)");
-            miDiscord.Click += (_,__) => OpenUrl(DiscordUrl);
+            miDiscord.Click += (_, __) => OpenUrl(DiscordUrl);
             mHelp.DropDownItems.Add(miDiscord);
 
             _menuStrip.Items.Add(mSource);
@@ -454,22 +521,32 @@ namespace MakeYourChoice
             // ── Tip label ────────────────────────────────────────────────
             _lblTip = new Label
             {
-                Text        = "Tip: You can select multiple servers. The game will decide which one to use based on latency.",
-                AutoSize    = true,
+                Text = "Tip: You can select multiple servers. The game will decide which one to use based on latency.",
+                AutoSize = true,
                 MaximumSize = new Size(Width - Padding.Horizontal - 20, 0),
-                TextAlign   = ContentAlignment.MiddleLeft,
-                Padding     = new Padding(5),
-                Margin      = new Padding(0, 0, 0, 10)
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(5),
+                Margin = new Padding(0, 0, 0, 10)
+            };
+
+            // ── Server Info label ────────────────────────────────────────
+            _lblServerInfo = new Label
+            {
+                Text = "Current Match Server: (waiting for traffic...)",
+                AutoSize = true,
+                Font = new Font(Font.FontFamily, 9, FontStyle.Bold),
+                Padding = new Padding(5),
+                Margin = new Padding(0, 0, 0, 5)
             };
 
             // ── ListView ─────────────────────────────────────────────────
             _lv = new ListView
             {
-                View          = View.Details,
-                CheckBoxes    = true,
+                View = View.Details,
+                CheckBoxes = true,
                 FullRowSelect = true,
-                ShowGroups    = true,
-                Dock          = DockStyle.Fill
+                ShowGroups = true,
+                Dock = DockStyle.Fill
             };
             _lv.ShowItemToolTips = true;
             // Enable double buffering to reduce flicker
@@ -480,13 +557,13 @@ namespace MakeYourChoice
                 _lv,
                 new object[] { true }
             );
-            _lv.Columns.Add("Server",  220);
+            _lv.Columns.Add("Server", 220);
             _lv.Columns.Add("Latency", 115);
-            var grpEurope   = new ListViewGroup("Europe",     HorizontalAlignment.Left) { Name = "Europe" };
-            var grpAmericas = new ListViewGroup("The Americas",HorizontalAlignment.Left) { Name = "Americas" };
-            var grpAsia     = new ListViewGroup("Asia (Excl. Cn)",       HorizontalAlignment.Left) { Name = "Asia" };
-            var grpOceania  = new ListViewGroup("Oceania",    HorizontalAlignment.Left) { Name = "Oceania" };
-            var grpChina    = new ListViewGroup("Mainland China",      HorizontalAlignment.Left) { Name = "China" };
+            var grpEurope = new ListViewGroup("Europe", HorizontalAlignment.Left) { Name = "Europe" };
+            var grpAmericas = new ListViewGroup("The Americas", HorizontalAlignment.Left) { Name = "Americas" };
+            var grpAsia = new ListViewGroup("Asia (Excl. Cn)", HorizontalAlignment.Left) { Name = "Asia" };
+            var grpOceania = new ListViewGroup("Oceania", HorizontalAlignment.Left) { Name = "Oceania" };
+            var grpChina = new ListViewGroup("Mainland China", HorizontalAlignment.Left) { Name = "China" };
             _lv.Groups.AddRange(new[] { grpEurope, grpAmericas, grpAsia, grpOceania, grpChina });
             foreach (var kv in _regions)
             {
@@ -509,36 +586,37 @@ namespace MakeYourChoice
             }
 
             // ── Buttons ─────────────────────────────────────────────────
-            _btnApply  = new Button { Text = "Apply Selection",    AutoSize = true, Margin = new Padding(5) };
+            _btnApply = new Button { Text = "Apply Selection", AutoSize = true, Margin = new Padding(5) };
             _btnRevert = new Button { Text = "Revert to Default", AutoSize = true, Margin = new Padding(5) };
-            _btnApply.Click  += BtnApply_Click;
+            _btnApply.Click += BtnApply_Click;
             _btnRevert.Click += BtnRevert_Click;
             _buttonPanel = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.RightToLeft,
-                Dock          = DockStyle.Bottom,
-                Padding       = new Padding(5),
-                AutoSize      = true
+                Dock = DockStyle.Bottom,
+                Padding = new Padding(5),
+                AutoSize = true
             };
             _buttonPanel.Controls.Add(_btnApply);
             _buttonPanel.Controls.Add(_btnRevert);
 
-            // ── Layout ──────────────────────────────────────────────────
             var tlp = new TableLayoutPanel
             {
-                Dock        = DockStyle.Fill,
+                Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount    = 4
+                RowCount = 5
             };
             tlp.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // menu
+            tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // server info
             tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // tip
             tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // buttons
 
-            tlp.Controls.Add(_lv,          0, 0);
-            tlp.Controls.Add(_menuStrip,   0, 1);
-            tlp.Controls.Add(_lblTip,      0, 2);
-            tlp.Controls.Add(_buttonPanel, 0, 3);
+            tlp.Controls.Add(_lv, 0, 0);
+            tlp.Controls.Add(_menuStrip, 0, 1);
+            tlp.Controls.Add(_lblServerInfo, 0, 2);
+            tlp.Controls.Add(_lblTip, 0, 3);
+            tlp.Controls.Add(_buttonPanel, 0, 4);
 
             Controls.Add(tlp);
         }
@@ -621,7 +699,7 @@ namespace MakeYourChoice
                 Text = "Custom splash art",
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 StartPosition = FormStartPosition.CenterParent,
-            ClientSize = new Size(420, 210),
+                ClientSize = new Size(420, 210),
                 MaximizeBox = false,
                 MinimizeBox = false,
                 ShowInTaskbar = false,
@@ -793,8 +871,8 @@ namespace MakeYourChoice
 
         private async Task CheckForUpdatesAsync(bool silent)
         {
-            if (silent && !string.IsNullOrEmpty(_autoUpdateCheckPausedUntil) 
-                && DateTime.TryParse(_autoUpdateCheckPausedUntil, out var pausedUntil) 
+            if (silent && !string.IsNullOrEmpty(_autoUpdateCheckPausedUntil)
+                && DateTime.TryParse(_autoUpdateCheckPausedUntil, out var pausedUntil)
                 && DateTime.Now < pausedUntil)
             {
                 return;
@@ -818,7 +896,7 @@ namespace MakeYourChoice
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("MakeYourChoice/1.0");
                 // fetch all releases
                 var url = $"https://api.github.com/repos/{Developer}/{Repo}/releases";
-                
+
                 using var stream = await client.GetStreamAsync(url);
                 using var doc = await JsonDocument.ParseAsync(stream);
                 var root = doc.RootElement;
@@ -917,9 +995,9 @@ namespace MakeYourChoice
                             var regionKey = (string)item.Tag;
                             var ms = results[regionKey];
                             var sub = item.SubItems[1];
-                            sub.Text      = ms >= 0 ? $"{ms} ms" : "disconnected";
+                            sub.Text = ms >= 0 ? $"{ms} ms" : "disconnected";
                             sub.ForeColor = GetColorForLatency(ms);
-                            sub.Font      = new Font(sub.Font, FontStyle.Italic);
+                            sub.Font = new Font(sub.Font, FontStyle.Italic);
                         }
                     }
                     finally
@@ -938,8 +1016,8 @@ namespace MakeYourChoice
 
         private Color GetColorForLatency(long ms)
         {
-            if (ms < 0)   return Color.Gray;
-            if (ms < 80)  return Color.Green;
+            if (ms < 0) return Color.Gray;
+            if (ms < 80) return Color.Green;
             if (ms < 130) return Color.Orange;
             if (ms < 250) return Color.Crimson;
             return Color.Purple;
@@ -951,7 +1029,7 @@ namespace MakeYourChoice
             if (region.StartsWith("US") || region.StartsWith("Canada") || region.StartsWith("South America"))
                 return "Americas";
             if (region.Contains("Sydney")) return "Oceania";
-            if (region.Contains("China"))  return "China";
+            if (region.Contains("China")) return "China";
             return "Asia";
         }
 
@@ -1208,18 +1286,18 @@ namespace MakeYourChoice
                 var regionKey = (string)_lv.CheckedItems[0].Tag;
                 var hosts = _regions[regionKey].Hosts;
                 var serviceHost = hosts[0];
-                var pingHost    = hosts.Length > 1 ? hosts[1] : hosts[0];
+                var pingHost = hosts.Length > 1 ? hosts[1] : hosts[0];
 
                 // resolve via DNS lookup to obtain IP addresses
                 string svcIp, pingIp;
                 try
                 {
-                    var svcAddrs  = Dns.GetHostAddresses(serviceHost);
+                    var svcAddrs = Dns.GetHostAddresses(serviceHost);
                     var pingAddrs = Dns.GetHostAddresses(pingHost);
                     if (svcAddrs.Length == 0 || pingAddrs.Length == 0)
                         throw new Exception("DNS lookup returned no addresses");
 
-                    svcIp  = svcAddrs[0].ToString();
+                    svcIp = svcAddrs[0].ToString();
                     pingIp = pingAddrs[0].ToString();
                 }
                 catch (Exception ex)
@@ -1497,7 +1575,7 @@ namespace MakeYourChoice
 
             string lf = NormalizeToLf(original);
             int first = lf.IndexOf(SectionMarker, StringComparison.Ordinal);
-            int last  = first >= 0 ? lf.IndexOf(SectionMarker, first + SectionMarker.Length, StringComparison.Ordinal) : -1;
+            int last = first >= 0 ? lf.IndexOf(SectionMarker, first + SectionMarker.Length, StringComparison.Ordinal) : -1;
 
             // Build the new wrapped block (marker, content, marker) using LF first
             string innerLf = NormalizeToLf(innerContent ?? string.Empty);
@@ -1537,20 +1615,20 @@ namespace MakeYourChoice
         {
             var about = new Form
             {
-                Text            = "About Make Your Choice",
+                Text = "About Make Your Choice",
                 FormBorderStyle = FormBorderStyle.FixedDialog,
-                StartPosition   = FormStartPosition.CenterParent,
-                ClientSize      = new Size(500, 380),
-                MaximizeBox     = false,
-                MinimizeBox     = false,
-                ShowInTaskbar   = false,
-                Padding         = new Padding(20)
+                StartPosition = FormStartPosition.CenterParent,
+                ClientSize = new Size(500, 380),
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ShowInTaskbar = false,
+                Padding = new Padding(20)
             };
 
             var lblTitle = new Label
             {
-                Text     = "Make Your Choice (DbD Server Selector)",
-                Font     = new Font(Font.FontFamily, 10, FontStyle.Bold),
+                Text = "Make Your Choice (DbD Server Selector)",
+                Font = new Font(Font.FontFamily, 10, FontStyle.Bold),
                 AutoSize = true,
                 Location = new Point(20, 20)
             };
@@ -1561,8 +1639,8 @@ namespace MakeYourChoice
             {
                 var lblDevLink = new LinkLabel
                 {
-                    Text     = "Developer: " + Developer,
-                    Font     = new Font(Font.FontFamily, 8),
+                    Text = "Developer: " + Developer,
+                    Font = new Font(Font.FontFamily, 8),
                     AutoSize = true,
                     Location = new Point(20, lblTitle.Bottom + 10)
                 };
@@ -1577,8 +1655,8 @@ namespace MakeYourChoice
             {
                 lblDeveloper = new Label
                 {
-                    Text     = "Developer: (unknown)",
-                    Font     = new Font(Font.FontFamily, 8),
+                    Text = "Developer: (unknown)",
+                    Font = new Font(Font.FontFamily, 8),
                     AutoSize = true,
                     Location = new Point(20, lblTitle.Bottom + 10)
                 };
@@ -1586,8 +1664,8 @@ namespace MakeYourChoice
 
             var lblVersion = new Label
             {
-                Text     = $"Version {CurrentVersion}\nWindows 10 or higher.",
-                Font     = new Font(Font.FontFamily, 8, FontStyle.Italic),
+                Text = $"Version {CurrentVersion}\nWindows 10 or higher.",
+                Font = new Font(Font.FontFamily, 8, FontStyle.Italic),
                 AutoSize = true,
                 Location = new Point(20, lblDeveloper.Bottom + 10)
             };
@@ -1595,8 +1673,8 @@ namespace MakeYourChoice
             // Separator
             var separator = new Panel
             {
-                Height   = 1,
-                Width    = 460,
+                Height = 1,
+                Width = 460,
                 Location = new Point(20, lblVersion.Bottom + 15),
                 BorderStyle = BorderStyle.FixedSingle
             };
@@ -1604,8 +1682,8 @@ namespace MakeYourChoice
             // Copyright notice
             var lblCopyright = new Label
             {
-                Text     = "Copyright © 2026",
-                Font     = new Font(Font.FontFamily, 8),
+                Text = "Copyright © 2026",
+                Font = new Font(Font.FontFamily, 8),
                 AutoSize = true,
                 Location = new Point(20, separator.Bottom + 15)
             };
@@ -1613,12 +1691,12 @@ namespace MakeYourChoice
             // License information
             var lblLicense = new Label
             {
-                Text     = "This program is free software licensed\n" +
+                Text = "This program is free software licensed\n" +
                           "under the terms of the GNU General Public License.\n" +
                           "This program is distributed in the hope that it will be useful, but\n" +
                           "without any warranty. See the GNU General Public License\n" +
                           "for more details.",
-                Font     = new Font(Font.FontFamily, 8),
+                Font = new Font(Font.FontFamily, 8),
                 AutoSize = true,
                 Location = new Point(20, lblCopyright.Bottom + 10),
                 MaximumSize = new Size(460, 0)
@@ -1626,11 +1704,11 @@ namespace MakeYourChoice
 
             var btnOk = new Button
             {
-                Text         = "Awesome!",
+                Text = "Awesome!",
                 DialogResult = DialogResult.OK,
-                AutoSize     = true,
+                AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Anchor       = AnchorStyles.Bottom | AnchorStyles.Right,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
             };
             btnOk.Location = new Point(
                 about.ClientSize.Width - btnOk.Width - 20,
@@ -1698,7 +1776,7 @@ namespace MakeYourChoice
             };
             cbApplyMode.Items.AddRange(new[] { "Gatekeep (default)", "Universal Redirect (deprecated)" });
             cbApplyMode.SelectedIndex = _applyMode == ApplyMode.UniversalRedirect ? 1 : 0;
-            
+
             var lblModeNotice = new Label
             {
                 Text = "After changing this setting, reapply your selection to apply changes.",
@@ -1732,7 +1810,7 @@ namespace MakeYourChoice
             var rbBoth = new RadioButton { Text = "Block both (default)", AutoSize = true, Margin = new Padding(3, 3, 3, 3) };
             var rbPing = new RadioButton { Text = "Block UDP ping beacon endpoints", AutoSize = true, Margin = new Padding(3, 3, 3, 3) };
             var rbService = new RadioButton { Text = "Block service endpoints", AutoSize = true, Margin = new Padding(3, 3, 3, 10) };
-            
+
             var cbMergeUnstable = new CheckBox
             {
                 Text = "Merge unstable servers (recommended)…",
@@ -1820,12 +1898,13 @@ namespace MakeYourChoice
                 Padding = new Padding(10),
                 Dock = DockStyle.Fill
             };
-            var tlpGame = new TableLayoutPanel {
-                 Dock = DockStyle.Fill,
-                 AutoSize = true, 
-                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                 ColumnCount = 2,
-                 RowCount = 2
+            var tlpGame = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2,
+                RowCount = 2
             };
 
             var tbGamePath = new TextBox
@@ -1872,10 +1951,10 @@ namespace MakeYourChoice
                     tbGamePath.Text = selected;
                 }
             };
-            
+
             tlpGame.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             tlpGame.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            
+
             tlpGame.Controls.Add(tbGamePath, 0, 0);
             tlpGame.Controls.Add(btnBrowse, 1, 0);
             tlpGame.Controls.Add(lblGameHint, 0, 1);
@@ -1955,9 +2034,9 @@ namespace MakeYourChoice
                 _applyMode = cbApplyMode.SelectedIndex == 1 ? ApplyMode.UniversalRedirect : ApplyMode.Gatekeep;
                 if (_applyMode == ApplyMode.Gatekeep)
                 {
-                    if (rbBoth.Checked)       _blockMode = BlockMode.Both;
-                    else if (rbPing.Checked)  _blockMode = BlockMode.OnlyPing;
-                    else                      _blockMode = BlockMode.OnlyService;
+                    if (rbBoth.Checked) _blockMode = BlockMode.Both;
+                    else if (rbPing.Checked) _blockMode = BlockMode.OnlyPing;
+                    else _blockMode = BlockMode.OnlyService;
                 }
                 _mergeUnstable = cbMergeUnstable.Checked;
                 _gamePath = gamePathText;
@@ -1965,7 +2044,7 @@ namespace MakeYourChoice
                 SaveSettings();
                 ApplyTheme();
                 UpdateRegionListViewAppearance();
-                
+
                 if (darkModeChanged)
                 {
                     Application.Restart();
