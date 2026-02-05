@@ -158,6 +158,10 @@ namespace MakeYourChoice
         private bool _mergeUnstable = true;
         private string _gamePath;
         private bool _darkMode = false;
+        private Label _lblConnectedToValue;
+        private Label _lblConnectionDot; 
+        private TrafficSniffer _sniffer;
+        private AwsIpService _awsService;
 
         // Tracks the last launched version for update message display
         private string _lastLaunchedVersion;
@@ -305,6 +309,15 @@ namespace MakeYourChoice
         public Form1()
         {
             InitializeComponent();
+
+            // Initialize AWS Service and Sniffer
+            _awsService = new AwsIpService();
+            _ = _awsService.InitializeAsync(); // Start fetching in background
+
+            _sniffer = new TrafficSniffer();
+            _sniffer.TrafficDetected += OnTrafficDetected;
+            _sniffer.Start();
+
             this.Icon = new Icon(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.ico"));
             this.Shown += async (_, __) =>
             {
@@ -345,6 +358,85 @@ namespace MakeYourChoice
             {
                 // API call failed, Developer remains null
             }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            _sniffer?.Stop();
+            base.OnFormClosing(e);
+        }
+
+        private void OnTrafficDetected(string ip, int port)
+        {
+            if (this.Disposing || this.IsDisposed) return;
+            
+            try 
+            {
+                this.Invoke((System.Windows.Forms.MethodInvoker)delegate
+                {
+                    var regionCode = _awsService.GetRegionForIp(ip);
+                    string text;
+                    Color color;
+
+                    if (!string.IsNullOrEmpty(regionCode))
+                    {
+                        var friendlyName = AwsIpService.GetPrettyRegionName(regionCode);
+                        text = $"{friendlyName}"; 
+                        color = _darkMode ? Color.LightGreen : Color.DarkGreen;
+                    }
+                    else
+                    {
+                        text = $"Unknown Region [{ip}]";
+                        color = _darkMode ? Color.Gold : Color.DarkGoldenrod;
+                    }
+                    
+                    _lblConnectedToValue.Text = text;
+                    
+                    // Determine dot color
+                    Color dotColor;
+                    if (string.IsNullOrEmpty(regionCode))
+                    {
+                        // Unknown region or waiting state handled by default or unknown text
+                        if (text.Contains("Waiting"))
+                             dotColor = _darkMode ? Color.SkyBlue : Color.DodgerBlue; // Waiting
+                        else
+                             dotColor = _darkMode ? Color.Gold : Color.DarkGoldenrod; // Unknown region Warning
+                    }
+                    else
+                    {
+                        // Check if this region is allowed (checked in list view)
+                        // "friendlyName" is just the display name, we need to match the key.
+                        // The GetRegionForIp returns the region code (e.g., eu-west-2).
+                        
+                        var key = AwsIpService.GetPrettyRegionName(regionCode);
+                        
+                        // Check if this key exists in our ListView and is checked.
+                        bool isAllowed = false;
+                        foreach (ListViewItem item in _lv.Items)
+                        {
+                            if (item.Tag is string itemKey && itemKey == key)
+                            {
+                                isAllowed = item.Checked;
+                                break;
+                            }
+                        }
+                        
+                        if (isAllowed)
+                        {
+                             dotColor = _darkMode ? Color.LimeGreen : Color.Green;
+                        }
+                        else
+                        {
+                             dotColor = _darkMode ? Color.IndianRed : Color.Red;
+                        }
+                    }
+                    
+                    _lblConnectionDot.ForeColor = dotColor;
+
+                    _lblConnectedToValue.ForeColor = _darkMode ? Color.White : Color.Black; // Reset text color to standard
+                });
+            }
+            catch { /* Ignore if UI is gone */ }
         }
 
         private void InitializeComponent()
@@ -451,6 +543,49 @@ namespace MakeYourChoice
             _menuStrip.Items.Add(mOptions);
             _menuStrip.Items.Add(mHelp);
 
+            // ── Connected To Panel ──────────────────────────────────────
+            var flpConnection = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                FlowDirection = FlowDirection.LeftToRight,
+                Padding = new Padding(5, 5, 5, 0),
+                Margin = new Padding(0),
+                WrapContents = false
+            };
+
+            _lblConnectionDot = new Label
+            {
+                Text        = "◉",
+                AutoSize    = true,
+                Font        = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
+                Margin      = new Padding(0, 0, 5, 0), // Right margin to separate from text
+                TextAlign   = ContentAlignment.MiddleCenter,
+                ForeColor   = _darkMode ? Color.SkyBlue : Color.DodgerBlue // Default waiting color
+            };
+
+            var lblConnectedToTitle = new Label
+            {
+                Text        = "Connected to: ",
+                AutoSize    = true,
+                // Using DefaultFont instead of this.Font (which might not be set yet)
+                Font        = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
+                Margin      = new Padding(0),
+                TextAlign   = ContentAlignment.MiddleLeft
+            };
+
+            _lblConnectedToValue = new Label
+            {
+                Text        = "Waiting for match…",
+                AutoSize    = true,
+                Font        = new Font(SystemFonts.DefaultFont, FontStyle.Italic),
+                Margin      = new Padding(0),
+                TextAlign   = ContentAlignment.MiddleLeft
+            };
+
+            flpConnection.Controls.Add(_lblConnectionDot);
+            flpConnection.Controls.Add(lblConnectedToTitle);
+            flpConnection.Controls.Add(_lblConnectedToValue);
+
             // ── Tip label ────────────────────────────────────────────────
             _lblTip = new Label
             {
@@ -528,17 +663,19 @@ namespace MakeYourChoice
             {
                 Dock        = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount    = 4
+                RowCount    = 5
             };
             tlp.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // menu
+            tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // connected info
             tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // tip
             tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // buttons
 
             tlp.Controls.Add(_lv,          0, 0);
             tlp.Controls.Add(_menuStrip,   0, 1);
-            tlp.Controls.Add(_lblTip,      0, 2);
-            tlp.Controls.Add(_buttonPanel, 0, 3);
+            tlp.Controls.Add(flpConnection, 0, 2);
+            tlp.Controls.Add(_lblTip,      0, 3);
+            tlp.Controls.Add(_buttonPanel, 0, 4);
 
             Controls.Add(tlp);
         }
