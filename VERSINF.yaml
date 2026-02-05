@@ -1,4 +1,4 @@
-version: v2.4.1
+version: v2.5
 notes:
-  - Update popup now lets you deffer/pause update notifications.
-  - Experimental dark mode for Windows.
+  - MYC now displays the region your current match is connected to.
+  - Windows dark mode improvements.

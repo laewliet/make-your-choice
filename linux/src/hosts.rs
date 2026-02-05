@@ -7,6 +7,7 @@ use crate::region::{BlockMode, RegionInfo, get_group_name};
 const SECTION_MARKER: &str = "# --+ Make Your Choice +--";
 const HOSTS_PATH: &str = "/etc/hosts";
 
+#[derive(Clone)]
 pub struct HostsManager {
     discord_url: String,
 }
@@ -22,30 +23,16 @@ impl HostsManager {
     }
 
     fn write_hosts(&self, content: &str) -> Result<()> {
-        // Write to a temporary file first
-        let temp_path = "/tmp/make-your-choice-hosts.tmp";
-        fs::write(temp_path, content)
-            .context("Failed to write temporary file")?;
+        // Backup current hosts (best effort)
+        let _ = fs::copy(HOSTS_PATH, format!("{}.bak", HOSTS_PATH));
 
-        // Combine all operations into a single pkexec call to avoid multiple prompts
-        let combined_command = format!(
-            "cp {} {}.bak 2>/dev/null || true && cp {} {} && (systemd-resolve --flush-caches 2>/dev/null || resolvectl flush-caches 2>/dev/null || nscd -i hosts 2>/dev/null || true)",
-            HOSTS_PATH, HOSTS_PATH, temp_path, HOSTS_PATH
-        );
+        fs::write(HOSTS_PATH, content)
+            .context("Failed to write to /etc/hosts")?;
 
-        let status = Command::new("pkexec")
-            .arg("sh")
+        let _ = Command::new("sh")
             .arg("-c")
-            .arg(&combined_command)
-            .status()
-            .context("Failed to execute pkexec")?;
-
-        // Clean up temp file
-        let _ = fs::remove_file(temp_path);
-
-        if !status.success() {
-            bail!("Failed to write to {}. Operation was cancelled or permission was denied.", HOSTS_PATH);
-        }
+            .arg("systemd-resolve --flush-caches 2>/dev/null || resolvectl flush-caches 2>/dev/null || nscd -i hosts 2>/dev/null || true")
+            .status();
 
         Ok(())
     }
@@ -90,6 +77,40 @@ impl HostsManager {
         };
 
         self.write_hosts(&new_content)
+    }
+
+    pub fn get_blocked_hostnames(&self) -> HashSet<String> {
+        let mut blocked = HashSet::new();
+        let Ok(original) = self.read_hosts() else { return blocked; };
+
+        let first = original.find(SECTION_MARKER);
+        let last = if let Some(pos) = first {
+            original[pos + SECTION_MARKER.len()..].find(SECTION_MARKER)
+                .map(|p| p + pos + SECTION_MARKER.len())
+        } else {
+            None
+        };
+
+        let inner = match (first, last) {
+            (Some(f), Some(l)) => &original[f + SECTION_MARKER.len()..l],
+            _ => return blocked,
+        };
+
+        for raw_line in inner.lines() {
+            let line = raw_line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 2 { continue; }
+            if parts[0] != "0.0.0.0" { continue; }
+
+            for host in parts.iter().skip(1) {
+                blocked.insert(host.to_lowercase());
+            }
+        }
+
+        blocked
     }
 
     pub fn apply_gatekeep(

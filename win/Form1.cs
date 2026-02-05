@@ -158,6 +158,15 @@ namespace MakeYourChoice
         private bool _mergeUnstable = true;
         private string _gamePath;
         private bool _darkMode = false;
+        private Label _lblConnectedToValue;
+        private Label _lblConnectionDot; 
+        private TrafficSniffer _sniffer;
+        private AwsIpService _awsService;
+        private string _lastDetectedIp;
+        private int _lastDetectedPort;
+        private ToolTip _connectionToolTip;
+        private Timer _connectionTooltipTimer;
+        private DateTime? _lastConnectionUpdate;
 
         // Tracks the last launched version for update message display
         private string _lastLaunchedVersion;
@@ -305,6 +314,18 @@ namespace MakeYourChoice
         public Form1()
         {
             InitializeComponent();
+
+            _connectionTooltipTimer = new Timer { Interval = 1000 };
+            _connectionTooltipTimer.Tick += (_, __) => UpdateConnectionTooltip();
+            _connectionTooltipTimer.Start();
+
+            // Initialize AWS Service and Sniffer
+            _awsService = new AwsIpService();
+
+            _sniffer = new TrafficSniffer();
+            _sniffer.TrafficDetected += OnTrafficDetected;
+            _sniffer.Start();
+
             this.Icon = new Icon(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.ico"));
             this.Shown += async (_, __) =>
             {
@@ -345,6 +366,76 @@ namespace MakeYourChoice
             {
                 // API call failed, Developer remains null
             }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            _sniffer?.Stop();
+            base.OnFormClosing(e);
+        }
+
+        private async void OnTrafficDetected(string ip, int port)
+        {
+            if (this.Disposing || this.IsDisposed) return;
+
+            _lastDetectedIp = ip;
+            _lastDetectedPort = port;
+            
+            try 
+            {
+                var regionName = await Task.Run(() => _awsService.GetRegionForIp(ip));
+
+                this.Invoke((System.Windows.Forms.MethodInvoker)delegate
+                {
+                    string text;
+                    Color color;
+
+                    if (!string.IsNullOrEmpty(regionName))
+                    {
+                        text = $"{regionName}"; 
+                        color = _darkMode ? Color.LightGreen : Color.DarkGreen;
+                    }
+                    else
+                    {
+                        text = $"Unknown Region [{ip}]";
+                        color = _darkMode ? Color.Gold : Color.DarkGoldenrod;
+                    }
+                    
+                    _lblConnectedToValue.Text = text;
+                    
+                    // Determine dot color
+                    Color dotColor;
+                    if (string.IsNullOrEmpty(regionName))
+                    {
+                        // Unknown region or waiting state handled by default or unknown text
+                        if (text.Contains("Waiting"))
+                             dotColor = Color.DodgerBlue; // Waiting
+                        else
+                             dotColor = Color.DarkGoldenrod; // Unknown region Warning
+                    }
+                    else
+                    {
+                        var blockedHosts = GetBlockedHostnamesFromHostsSection();
+                        var isBlocked = IsRegionBlockedByHosts(regionName, blockedHosts);
+
+                        if (!isBlocked)
+                        {
+                             dotColor = Color.Green;
+                        }
+                        else
+                        {
+                             dotColor = Color.Red;
+                        }
+                    }
+                    
+                    _lblConnectionDot.ForeColor = dotColor;
+
+                    _lblConnectedToValue.ForeColor = _darkMode ? Color.White : Color.Black; // Reset text color to standard
+                    _lastConnectionUpdate = DateTime.Now;
+                    UpdateConnectionTooltip();
+                });
+            }
+            catch { /* Ignore if UI is gone */ }
         }
 
         private void InitializeComponent()
@@ -451,6 +542,52 @@ namespace MakeYourChoice
             _menuStrip.Items.Add(mOptions);
             _menuStrip.Items.Add(mHelp);
 
+            // ── Connected To Panel ──────────────────────────────────────
+            var flpConnection = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                FlowDirection = FlowDirection.LeftToRight,
+                Padding = new Padding(5, 5, 5, 0),
+                Margin = new Padding(0),
+                WrapContents = false
+            };
+
+            _lblConnectionDot = new Label
+            {
+                Text        = "◉",
+                AutoSize    = true,
+                Font        = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
+                Margin      = new Padding(0, 0, 5, 0), // Right margin to separate from text
+                TextAlign   = ContentAlignment.MiddleCenter,
+                ForeColor   = _darkMode ? Color.SkyBlue : Color.DodgerBlue // Default waiting color
+            };
+
+            var lblConnectedToTitle = new Label
+            {
+                Text        = "Connected to: ",
+                AutoSize    = true,
+                // Using DefaultFont instead of this.Font (which might not be set yet)
+                Font        = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
+                Margin      = new Padding(0),
+                TextAlign   = ContentAlignment.MiddleLeft
+            };
+
+            _lblConnectedToValue = new Label
+            {
+                Text        = "Waiting for match…",
+                AutoSize    = true,
+                Font        = new Font(SystemFonts.DefaultFont, FontStyle.Italic),
+                Margin      = new Padding(0),
+                TextAlign   = ContentAlignment.MiddleLeft
+            };
+
+            _connectionToolTip = new ToolTip();
+            UpdateConnectionTooltip();
+
+            flpConnection.Controls.Add(_lblConnectionDot);
+            flpConnection.Controls.Add(lblConnectedToTitle);
+            flpConnection.Controls.Add(_lblConnectedToValue);
+
             // ── Tip label ────────────────────────────────────────────────
             _lblTip = new Label
             {
@@ -468,10 +605,71 @@ namespace MakeYourChoice
                 View          = View.Details,
                 CheckBoxes    = true,
                 FullRowSelect = true,
-                ShowGroups    = true,
+                ShowGroups    = false,
                 Dock          = DockStyle.Fill
             };
             _lv.ShowItemToolTips = true;
+            _lv.OwnerDraw = true;
+            _lv.DrawColumnHeader += (_, e) =>
+            {
+                using var bg = new SolidBrush(_lv.BackColor);
+                e.Graphics.FillRectangle(bg, e.Bounds);
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    e.Header.Text,
+                    e.Font,
+                    e.Bounds,
+                    _lv.ForeColor,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis
+                );
+            };
+            _lv.DrawItem += (_, e) =>
+            {
+                if (!(e.Item.Tag is string))
+                {
+                    using var bg = new SolidBrush(_lv.BackColor);
+                    e.Graphics.FillRectangle(bg, e.Bounds);
+                }
+                else
+                {
+                    e.DrawDefault = true;
+                }
+            };
+            _lv.DrawSubItem += (_, e) =>
+            {
+                if (e.Item.Tag is string)
+                {
+                    e.DrawDefault = true;
+                    return;
+                }
+
+                if (e.ColumnIndex != 0)
+                    return;
+
+                var font = e.Item.Font ?? _lv.Font;
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    e.SubItem.Text,
+                    font,
+                    e.Bounds,
+                    e.Item.ForeColor,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis
+                );
+            };
+            _lv.ItemCheck += (_, e) =>
+            {
+                if (!(_lv.Items[e.Index].Tag is string))
+                {
+                    e.NewValue = CheckState.Unchecked;
+                }
+            };
+            _lv.ItemSelectionChanged += (_, e) =>
+            {
+                if (!(e.Item.Tag is string) && e.IsSelected)
+                {
+                    e.Item.Selected = false;
+                }
+            };
             // Enable double buffering to reduce flicker
             typeof(ListView).InvokeMember(
                 "DoubleBuffered",
@@ -482,30 +680,45 @@ namespace MakeYourChoice
             );
             _lv.Columns.Add("Server",  220);
             _lv.Columns.Add("Latency", 115);
-            var grpEurope   = new ListViewGroup("Europe",     HorizontalAlignment.Left) { Name = "Europe" };
-            var grpAmericas = new ListViewGroup("The Americas",HorizontalAlignment.Left) { Name = "Americas" };
-            var grpAsia     = new ListViewGroup("Asia (Excl. Cn)",       HorizontalAlignment.Left) { Name = "Asia" };
-            var grpOceania  = new ListViewGroup("Oceania",    HorizontalAlignment.Left) { Name = "Oceania" };
-            var grpChina    = new ListViewGroup("Mainland China",      HorizontalAlignment.Left) { Name = "China" };
-            _lv.Groups.AddRange(new[] { grpEurope, grpAmericas, grpAsia, grpOceania, grpChina });
-            foreach (var kv in _regions)
+            var groupOrder = new (string Key, string Label)[]
             {
-                var regionKey = kv.Key;
-                var displayName = regionKey + (kv.Value.Stable ? string.Empty : " ⚠︎");
-                var item = new ListViewItem(displayName)
+                ("Europe", "Europe"),
+                ("Americas", "The Americas"),
+                ("Asia", "Asia (Excl. Cn)"),
+                ("Oceania", "Oceania")
+            };
+
+            foreach (var (key, label) in groupOrder)
+            {
+                var divider = new ListViewItem(label)
                 {
-                    Tag = regionKey,
-                    Group = _lv.Groups[GetGroupName(regionKey)],
+                    Tag = null,
                     Checked = false,
-                    UseItemStyleForSubItems = false
+                    UseItemStyleForSubItems = false,
+                    ForeColor = Color.DodgerBlue,
+                    Font = new Font(_lv.Font, FontStyle.Bold)
                 };
-                if (!kv.Value.Stable)
+                divider.SubItems.Add(string.Empty);
+                _lv.Items.Add(divider);
+
+                foreach (var kv in _regions.Where(kv => GetGroupName(kv.Key) == key))
                 {
-                    item.ForeColor = Color.Orange;
-                    item.ToolTipText = "Unstable: issues may occur.";
+                    var regionKey = kv.Key;
+                    var displayName = regionKey + (kv.Value.Stable ? string.Empty : " ⚠︎");
+                    var item = new ListViewItem(displayName)
+                    {
+                        Tag = regionKey,
+                        Checked = false,
+                        UseItemStyleForSubItems = false
+                    };
+                    if (!kv.Value.Stable)
+                    {
+                        item.ForeColor = Color.Orange;
+                        item.ToolTipText = "Unstable: issues may occur.";
+                    }
+                    item.SubItems.Add("…");
+                    _lv.Items.Add(item);
                 }
-                item.SubItems.Add("…");
-                _lv.Items.Add(item);
             }
 
             // ── Buttons ─────────────────────────────────────────────────
@@ -528,19 +741,57 @@ namespace MakeYourChoice
             {
                 Dock        = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount    = 4
+                RowCount    = 5
             };
             tlp.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // menu
+            tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // connected info
             tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // tip
             tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // buttons
 
             tlp.Controls.Add(_lv,          0, 0);
             tlp.Controls.Add(_menuStrip,   0, 1);
-            tlp.Controls.Add(_lblTip,      0, 2);
-            tlp.Controls.Add(_buttonPanel, 0, 3);
+            tlp.Controls.Add(flpConnection, 0, 2);
+            tlp.Controls.Add(_lblTip,      0, 3);
+            tlp.Controls.Add(_buttonPanel, 0, 4);
 
             Controls.Add(tlp);
+        }
+
+        private void UpdateConnectionTooltip()
+        {
+            if (_connectionToolTip == null || _lblConnectedToValue == null) return;
+
+            string header;
+            if (_lastConnectionUpdate.HasValue)
+            {
+                var seconds = (int)Math.Max(0, (DateTime.Now - _lastConnectionUpdate.Value).TotalSeconds);
+                var time = FormatSmallCapsTime(_lastConnectionUpdate.Value);
+                header = $"Most recent connection: {seconds}s ago, at {time}";
+
+                if (seconds >= 5)
+                {
+                    _lblConnectedToValue.Text = "Waiting for match…";
+                    _lblConnectionDot.ForeColor = _darkMode ? Color.SkyBlue : Color.DodgerBlue;
+                }
+            }
+            else
+            {
+                header = "Most recent connection: —";
+            }
+
+            var tooltip =
+                header + "\n\n" +
+                "This is the region that Dead by Daylight chose\n" +
+                "when connecting you to their game.";
+
+            _connectionToolTip.SetToolTip(_lblConnectedToValue, tooltip);
+        }
+
+        private static string FormatSmallCapsTime(DateTime dt)
+        {
+            var time = dt.ToString("h:mmtt");
+            return time.Replace("AM", "ᴀᴍ").Replace("PM", "ᴘᴍ");
         }
 
         private void HandleCustomSplashArt()
@@ -888,10 +1139,11 @@ namespace MakeYourChoice
                 var results = new Dictionary<string, long>();
                 foreach (ListViewItem item in _lv.Items)
                 {
+                    if (!(item.Tag is string regionKey))
+                        continue;
                     long ms;
                     try
                     {
-                        var regionKey = (string)item.Tag;
                         var hosts = _regions[regionKey].Hosts;
                         var reply = await pinger.SendPingAsync(hosts[0], 2000);
                         ms = reply.Status == IPStatus.Success ? reply.RoundtripTime : -1;
@@ -900,7 +1152,7 @@ namespace MakeYourChoice
                     {
                         ms = -1;
                     }
-                    results[(string)item.Tag] = ms;
+                    results[regionKey] = ms;
                 }
 
                 // Update UI in one batch to avoid flicker (only after handles exist)
@@ -909,16 +1161,26 @@ namespace MakeYourChoice
 
                 void UpdateLatencyUI()
                 {
+                    var blockedHosts = GetBlockedHostnamesFromHostsSection();
                     _lv.BeginUpdate();
                     try
                     {
                         foreach (ListViewItem item in _lv.Items)
                         {
-                            var regionKey = (string)item.Tag;
+                            if (!(item.Tag is string regionKey))
+                                continue;
                             var ms = results[regionKey];
                             var sub = item.SubItems[1];
-                            sub.Text      = ms >= 0 ? $"{ms} ms" : "disconnected";
-                            sub.ForeColor = GetColorForLatency(ms);
+                            if (IsRegionBlockedByHosts(regionKey, blockedHosts))
+                            {
+                                sub.Text = "disconnected";
+                                sub.ForeColor = Color.Gray;
+                            }
+                            else
+                            {
+                                sub.Text = ms >= 0 ? $"{ms} ms" : "disconnected";
+                                sub.ForeColor = GetColorForLatency(ms);
+                            }
                             sub.Font      = new Font(sub.Font, FontStyle.Italic);
                         }
                     }
@@ -973,6 +1235,60 @@ namespace MakeYourChoice
                 }
             }
             return hostnames.ToList();
+        }
+
+        private HashSet<string> GetBlockedHostnamesFromHostsSection()
+        {
+            var blocked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var hostsContent = File.ReadAllText(HostsPath);
+                var normalized = hostsContent.Replace("\r\n", "\n").Replace("\r", "\n");
+                var firstMarker = normalized.IndexOf(SectionMarker, StringComparison.Ordinal);
+                if (firstMarker < 0) return blocked;
+                var secondMarker = normalized.IndexOf(SectionMarker, firstMarker + SectionMarker.Length, StringComparison.Ordinal);
+                if (secondMarker < 0) return blocked;
+
+                var inner = normalized.Substring(firstMarker + SectionMarker.Length, secondMarker - (firstMarker + SectionMarker.Length));
+                foreach (var rawLine in inner.Split('\n'))
+                {
+                    var line = rawLine.Trim();
+                    if (string.IsNullOrEmpty(line) || line.StartsWith("#", StringComparison.Ordinal))
+                        continue;
+
+                    var parts = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length < 2) continue;
+                    if (!string.Equals(parts[0], "0.0.0.0", StringComparison.Ordinal)) continue;
+
+                    for (int i = 1; i < parts.Length; i++)
+                    {
+                        blocked.Add(parts[i].ToLowerInvariant());
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore read errors
+            }
+
+            return blocked;
+        }
+
+        private bool IsRegionBlockedByHosts(string regionKey, HashSet<string> blockedHosts)
+        {
+            if (blockedHosts.Count == 0) return false;
+
+            if (_regions.TryGetValue(regionKey, out var info))
+            {
+                return info.Hosts.Any(h => blockedHosts.Contains(h.ToLowerInvariant()));
+            }
+
+            if (_blockedRegions.TryGetValue(regionKey, out var blockedInfo))
+            {
+                return blockedInfo.Hosts.Any(h => blockedHosts.Contains(h.ToLowerInvariant()));
+            }
+
+            return false;
         }
 
         private List<string> DetectConflictingEntries()
@@ -1195,7 +1511,11 @@ namespace MakeYourChoice
             // if universal redirect mode, redirect all endpoints to selected region's IPs
             if (_applyMode == ApplyMode.UniversalRedirect)
             {
-                if (_lv.CheckedItems.Count != 1)
+                var selectedRegionItems = _lv.CheckedItems.Cast<ListViewItem>()
+                    .Where(item => item.Tag is string)
+                    .ToList();
+
+                if (selectedRegionItems.Count != 1)
                 {
                     MessageBox.Show(
                         "Please select only one server when using Universal Redirect mode.",
@@ -1205,7 +1525,7 @@ namespace MakeYourChoice
                     return;
                 }
 
-                var regionKey = (string)_lv.CheckedItems[0].Tag;
+                var regionKey = (string)selectedRegionItems[0].Tag;
                 var hosts = _regions[regionKey].Hosts;
                 var serviceHost = hosts[0];
                 var pingHost    = hosts.Length > 1 ? hosts[1] : hosts[0];
@@ -1305,7 +1625,10 @@ namespace MakeYourChoice
             }
 
             // existing gatekeep mode logic
-            if (_lv.CheckedItems.Count == 0)
+            var selectedItems = _lv.CheckedItems.Cast<ListViewItem>()
+                .Where(item => item.Tag is string)
+                .ToList();
+            if (selectedItems.Count == 0)
             {
                 MessageBox.Show(
                     "Please select at least one server to allow.",
@@ -1320,7 +1643,7 @@ namespace MakeYourChoice
                 File.Copy(HostsPath, HostsPath + ".bak", true);
 
                 // Determine if user selected any stable servers
-                var selectedRegions = _lv.CheckedItems.Cast<ListViewItem>()
+                var selectedRegions = selectedItems
                                         .Select(item => (string)item.Tag)
                                         .ToList();
                 bool anyStableSelected = selectedRegions.Any(regionKey => _regions[regionKey].Stable);
@@ -1378,7 +1701,8 @@ namespace MakeYourChoice
 
                 foreach (ListViewItem item in _lv.Items)
                 {
-                    var regionKey = (string)item.Tag;
+                    if (!(item.Tag is string regionKey))
+                        continue;
                     bool allow = allowedSet.Contains(regionKey);
                     var hosts = _regions[regionKey].Hosts;
                     foreach (var h in hosts)
@@ -1979,7 +2303,13 @@ namespace MakeYourChoice
             var defaultColor = _lv.ForeColor;
             foreach (ListViewItem item in _lv.Items)
             {
-                var regionKey = (string)item.Tag;
+                if (!(item.Tag is string regionKey))
+                {
+                    item.ForeColor = Color.DodgerBlue;
+                    item.Font = new Font(_lv.Font, FontStyle.Bold);
+                    item.ToolTipText = string.Empty;
+                    continue;
+                }
                 if (_mergeUnstable && !_regions[regionKey].Stable)
                 {
                     item.Text = regionKey;

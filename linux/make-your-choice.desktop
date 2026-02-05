@@ -2,7 +2,7 @@
 Version=1.0
 Type=Application
 Name=Make Your Choice
-Comment=DbD Server Selector
+Comment=DbD Server Region Selector
 Exec=make-your-choice
 Icon=make-your-choice
 Terminal=false

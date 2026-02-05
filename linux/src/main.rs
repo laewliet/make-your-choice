@@ -3,6 +3,8 @@ mod ping;
 mod region;
 mod settings;
 mod update;
+mod sniff;
+mod aws_ranges;
 
 use gio::{Menu, SimpleAction};
 use glib::Type;
@@ -18,12 +20,15 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use chrono::{DateTime, Local};
 use tokio::runtime::Runtime;
 
 use hosts::HostsManager;
 use region::*;
 use settings::UserSettings;
 use update::UpdateChecker;
+use sniff::TrafficSniffer;
+use aws_ranges::AwsIpService;
 
 const APP_ID: &str = "dev.lawliet.makeyourchoice";
 
@@ -64,6 +69,7 @@ struct AppConfig {
     discord_url: String,
 }
 
+#[allow(dead_code)]
 struct AppState {
     config: AppConfig,
     regions: HashMap<String, RegionInfo>,
@@ -74,6 +80,10 @@ struct AppState {
     selected_regions: RefCell<HashSet<String>>,
     list_store: ListStore,
     tokio_runtime: Arc<Runtime>,
+    sniffer: Arc<TrafficSniffer>,
+    aws_service: Arc<AwsIpService>,
+    connected_to_label: Label,
+    connection_dot: Label,
 }
 
 fn get_color_for_latency(ms: i64) -> &'static str {
@@ -169,6 +179,8 @@ fn main() -> glib::ExitCode {
         std::process::exit(1);
     }
 
+    ensure_capabilities_or_exit();
+
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_activate(build_ui);
     app.run()
@@ -176,6 +188,55 @@ fn main() -> glib::ExitCode {
 
 fn is_running_as_root() -> bool {
     unsafe { libc::geteuid() == 0 }
+}
+
+fn ensure_capabilities_or_exit() {
+    let exe = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("Failed to get executable path: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    if has_required_caps(&exe) {
+        return;
+    }
+
+    let status = std::process::Command::new("pkexec")
+        .arg("setcap")
+        .arg("cap_net_raw,cap_dac_override+ep")
+        .arg(&exe)
+        .status();
+
+    match status {
+        Ok(s) if s.success() => {
+            let _ = std::process::Command::new(&exe).spawn();
+            std::process::exit(0);
+        }
+        Ok(_) => {
+            eprintln!("Failed to set required capabilities. Operation cancelled or permission denied.");
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Failed to run pkexec/setcap: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn has_required_caps(exe: &std::path::Path) -> bool {
+    let output = std::process::Command::new("getcap")
+        .arg(exe)
+        .output();
+
+    let Ok(output) = output else { return false; };
+    if !output.status.success() {
+        return false;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+    stdout.contains("cap_net_raw") && stdout.contains("cap_dac_override")
 }
 
 fn build_ui(app: &Application) {
@@ -401,45 +462,6 @@ fn build_ui(app: &Application) {
     scrolled.set_child(Some(&tree_view));
     scrolled.set_vexpand(true);
 
-    // Create app state
-    let app_state = Rc::new(AppState {
-        config: config.clone(),
-        regions: regions.clone(),
-            blocked_regions: blocked_regions.clone(),
-        settings: settings.clone(),
-        hosts_manager,
-        update_checker,
-        selected_regions: RefCell::new(HashSet::new()),
-        list_store: list_store.clone(),
-        tokio_runtime,
-    });
-
-    // Handle checkbox toggles
-    let app_state_clone = app_state.clone();
-    cell_toggle.connect_toggled(move |_, path| {
-        let list_store = &app_state_clone.list_store;
-        if let Some(iter) = list_store.iter(&path) {
-            // Check if this is a divider row (dividers shouldn't be toggleable)
-            let is_divider = list_store.get::<bool>(&iter, 4);
-            if is_divider {
-                return; // Don't allow toggling dividers
-            }
-
-            let checked = list_store.get::<bool>(&iter, 3);
-            list_store.set(&iter, &[(3, &!checked)]);
-
-            // Update selected regions
-            let region_name = list_store.get::<String>(&iter, 0);
-            let clean_name = region_name.replace(" ⚠︎", "");
-            let mut selected = app_state_clone.selected_regions.borrow_mut();
-            if !checked {
-                selected.insert(clean_name);
-            } else {
-                selected.remove(&clean_name);
-            }
-        }
-    });
-
     // Create window
     let window = ApplicationWindow::builder()
         .application(app)
@@ -472,6 +494,209 @@ fn build_ui(app: &Application) {
     }
 
     window.set_icon_name(Some(ICON_NAME));
+
+    // Connected to display
+    let connected_box = GtkBox::new(Orientation::Horizontal, 5);
+    connected_box.set_margin_start(10);
+    connected_box.set_margin_end(10);
+    connected_box.set_margin_top(8);
+    
+    let connection_dot = Label::builder()
+        .label("◉")
+        .css_classes(["connection-dot", "waiting"])
+        .build();
+    // Default blue waiting color
+    const CSS_DOT: &str = "label.connection-dot { color: #3498db; font-weight: bold; }";
+    let provider = gtk4::CssProvider::new();
+    provider.load_from_data(CSS_DOT);
+    gtk4::style_context_add_provider_for_display(
+        &gtk4::gdk::Display::default().expect("Could not connect to a display."),
+        &provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+
+    let connected_title = Label::builder()
+        .label("Connected to: ")
+        .css_classes(["bold-label"])
+        .build();
+        
+    let connected_value = Label::builder()
+        .label("Waiting for match...")
+        .css_classes(["italic-label"])
+        .build();
+    
+    // Additional CSS for styling
+    const CSS_STYLES: &str = "
+        label.bold-label { font-weight: bold; }
+        label.italic-label { font-style: italic; }
+    ";
+    let style_provider = gtk4::CssProvider::new();
+    style_provider.load_from_data(CSS_STYLES);
+    gtk4::style_context_add_provider_for_display(
+        &gtk4::gdk::Display::default().expect("Could not connect to a display."),
+        &style_provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+        
+    connected_box.append(&connection_dot);
+    connected_box.append(&connected_title);
+    connected_box.append(&connected_value);
+
+    // Tip label
+    let tip_label = Label::new(Some("Tip: You can select multiple servers. The game will decide which one to use based on latency."));
+    tip_label.set_wrap(true);
+    tip_label.set_max_width_chars(50);
+    tip_label.set_margin_start(10);
+    tip_label.set_margin_end(10);
+    tip_label.set_margin_top(5);
+    tip_label.set_margin_bottom(5);
+
+    // Buttons
+    let button_box = GtkBox::new(Orientation::Horizontal, 10);
+    button_box.set_halign(gtk4::Align::End);
+    button_box.set_margin_start(10);
+    button_box.set_margin_end(10);
+    button_box.set_margin_top(10);
+    button_box.set_margin_bottom(10);
+
+    let btn_revert = Button::with_label("Revert to Default");
+    let btn_apply = Button::with_label("Apply Selection");
+    btn_apply.add_css_class("suggested-action");
+
+    button_box.append(&btn_revert);
+    button_box.append(&btn_apply);
+
+    // Initialize AWS service
+    let aws_service = Arc::new(AwsIpService::new());
+
+    let (region_tx, region_rx) = std::sync::mpsc::channel::<(String, Option<String>)>();
+    {
+        let connected_label = connected_value.clone();
+        let connection_dot = connection_dot.clone();
+        let regions_map = regions.clone();
+        let blocked_regions_map = blocked_regions.clone();
+        let hosts_manager = hosts_manager.clone();
+        let last_update = Rc::new(RefCell::new(None::<DateTime<Local>>));
+        let last_update_clone = last_update.clone();
+
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            let blocked_hosts = hosts_manager.get_blocked_hostnames();
+            while let Ok((ip_string, region_name_opt)) = region_rx.try_recv() {
+                *last_update_clone.borrow_mut() = Some(Local::now());
+                let (text, is_known, region_key_opt) = if let Some(name) = region_name_opt {
+                    (name.clone(), true, Some(name))
+                } else {
+                    (format!("Unknown Region [{}]", ip_string), false, None)
+                };
+
+                connected_label.set_text(&text);
+
+                // Determine dot color
+                let mut color_class = "waiting"; // Blue (default)
+
+                if is_known {
+                    if let Some(key) = region_key_opt {
+                        let is_blocked = is_region_blocked_by_hosts(
+                            &key,
+                            &regions_map,
+                            &blocked_regions_map,
+                            &blocked_hosts,
+                        );
+
+                        if !is_blocked {
+                            color_class = "allowed"; // Green
+                        } else {
+                            color_class = "blocked"; // Red
+                        }
+                    }
+                } else {
+                    color_class = "unknown"; // Orange for unknown
+                }
+
+                // Apply CSS class to dot (remove existing classes first)
+                let _ = connection_dot.remove_css_class("waiting");
+                let _ = connection_dot.remove_css_class("good");
+                let _ = connection_dot.remove_css_class("bad");
+                let _ = connection_dot.remove_css_class("warning");
+                let _ = connection_dot.remove_css_class("allowed");
+                let _ = connection_dot.remove_css_class("blocked");
+                let _ = connection_dot.remove_css_class("unknown");
+                connection_dot.add_css_class(color_class);
+            }
+
+            let tooltip = if let Some(ts) = *last_update.borrow() {
+                let elapsed = (Local::now() - ts).num_seconds().max(0);
+                if elapsed >= 5 {
+                    connected_label.set_text("Waiting for match...");
+                    let _ = connection_dot.remove_css_class("waiting");
+                    let _ = connection_dot.remove_css_class("allowed");
+                    let _ = connection_dot.remove_css_class("blocked");
+                    let _ = connection_dot.remove_css_class("unknown");
+                    connection_dot.add_css_class("waiting");
+                }
+                format_update_tooltip(ts)
+            } else {
+                connected_label.set_text("Waiting for match...");
+                let _ = connection_dot.remove_css_class("allowed");
+                let _ = connection_dot.remove_css_class("blocked");
+                let _ = connection_dot.remove_css_class("unknown");
+                connection_dot.add_css_class("waiting");
+                "Most recent connection: —\n\nThis is the region that Dead by Daylight chose\nwhen connecting you to their game.".to_string()
+            };
+            connected_label.set_tooltip_text(Some(&tooltip));
+
+            glib::ControlFlow::Continue
+        });
+    }
+
+    // Initialize Sniffer
+    let aws_service_clone = aws_service.clone();
+    let runtime_clone = tokio_runtime.clone();
+    let region_tx_clone = region_tx.clone();
+
+    let sniffer = Arc::new(TrafficSniffer::new(move |remote_ip, _port| {
+        let aws = aws_service_clone.clone();
+        let runtime = runtime_clone.clone();
+        let ip_string = remote_ip.clone();
+        let region_tx = region_tx_clone.clone();
+
+        runtime.spawn(async move {
+            let region_name_opt = aws.get_region(&ip_string).await;
+            let _ = region_tx.send((ip_string, region_name_opt));
+        });
+    }));
+    
+    // Add Dot Color Styles
+    const DOT_COLORS: &str = "
+        label.waiting { color: #3498db; }
+        label.allowed { color: #2ecc71; }
+        label.blocked { color: #e74c3c; }
+        label.unknown { color: #f39c12; }
+    ";
+    let dot_provider = gtk4::CssProvider::new();
+    dot_provider.load_from_data(DOT_COLORS);
+    gtk4::style_context_add_provider_for_display(
+        &gtk4::gdk::Display::default().expect("Could not connect to a display."),
+        &dot_provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+
+    // Create app state
+    let app_state = Rc::new(AppState {
+        config: config.clone(),
+        regions: regions.clone(),
+        blocked_regions: blocked_regions.clone(),
+        settings: settings.clone(),
+        hosts_manager,
+        update_checker,
+        selected_regions: RefCell::new(HashSet::new()),
+        list_store: list_store.clone(),
+        tokio_runtime,
+        sniffer,
+        aws_service,
+        connected_to_label: connected_value,
+        connection_dot: connection_dot, 
+    });
 
     // Create menu bar
     let menu_box = GtkBox::new(Orientation::Horizontal, 5);
@@ -508,39 +733,42 @@ fn build_ui(app: &Application) {
     menu_box.append(&options_btn);
     menu_box.append(&help_btn);
 
-    // Tip label
-    let tip_label = Label::new(Some("Tip: You can select multiple servers. The game will decide which one to use based on latency."));
-    tip_label.set_wrap(true);
-    tip_label.set_max_width_chars(50);
-    tip_label.set_margin_start(10);
-    tip_label.set_margin_end(10);
-    tip_label.set_margin_top(5);
-    tip_label.set_margin_bottom(5);
-
-    // Buttons
-    let button_box = GtkBox::new(Orientation::Horizontal, 10);
-    button_box.set_halign(gtk4::Align::End);
-    button_box.set_margin_start(10);
-    button_box.set_margin_end(10);
-    button_box.set_margin_top(10);
-    button_box.set_margin_bottom(10);
-
-    let btn_revert = Button::with_label("Revert to Default");
-    let btn_apply = Button::with_label("Apply Selection");
-    btn_apply.add_css_class("suggested-action");
-
-    button_box.append(&btn_revert);
-    button_box.append(&btn_apply);
-
     // Main layout
     let main_box = GtkBox::new(Orientation::Vertical, 0);
     main_box.append(&menu_box);
     main_box.append(&Separator::new(Orientation::Horizontal));
+    main_box.append(&connected_box);
     main_box.append(&tip_label);
     main_box.append(&scrolled);
     main_box.append(&button_box);
 
     window.set_child(Some(&main_box));
+
+    // Handle checkbox toggles
+    let app_state_clone = app_state.clone();
+    cell_toggle.connect_toggled(move |_, path| {
+        let list_store = &app_state_clone.list_store;
+        if let Some(iter) = list_store.iter(&path) {
+            // Check if this is a divider row (dividers shouldn't be toggleable)
+            let is_divider = list_store.get::<bool>(&iter, 4);
+            if is_divider {
+                return; // Don't allow toggling dividers
+            }
+
+            let checked = list_store.get::<bool>(&iter, 3);
+            list_store.set(&iter, &[(3, &!checked)]);
+
+            // Update selected regions
+            let region_name = list_store.get::<String>(&iter, 0);
+            let clean_name = region_name.replace(" ⚠︎", "");
+            let mut selected = app_state_clone.selected_regions.borrow_mut();
+            if !checked {
+                selected.insert(clean_name);
+            } else {
+                selected.remove(&clean_name);
+            }
+        }
+    });
 
     // Connect button signals
     let app_state_clone = app_state.clone();
@@ -557,6 +785,13 @@ fn build_ui(app: &Application) {
 
     // Start ping timer
     start_ping_timer(app_state.clone());
+
+    // Ensure helper sniffer exits when the window closes
+    let app_state_clone = app_state.clone();
+    window.connect_close_request(move |_| {
+        app_state_clone.sniffer.stop();
+        glib::Propagation::Proceed
+    });
 
     // Check for updates silently on launch
     check_for_updates_silent(&app_state, &window);
@@ -1838,6 +2073,9 @@ fn show_error_dialog(parent: &ApplicationWindow, title: &str, message: &str) {
 fn start_ping_timer(app_state: Rc<AppState>) {
     glib::timeout_add_seconds_local(5, move || {
         let regions = app_state.regions.clone();
+        let regions_for_ping = regions.clone();
+        let blocked_regions = app_state.blocked_regions.clone();
+        let blocked_hosts = app_state.hosts_manager.get_blocked_hostnames();
         let runtime = app_state.tokio_runtime.clone();
         let list_store = app_state.list_store.clone();
 
@@ -1848,7 +2086,7 @@ fn start_ping_timer(app_state: Rc<AppState>) {
                     let mut results = HashMap::new();
 
                     // Perform all pings
-                    for (region_name, region_info) in regions.iter() {
+                    for (region_name, region_info) in regions_for_ping.iter() {
                         if let Some(host) = region_info.hosts.first() {
                             let latency = ping::ping_host(host).await;
                             results.insert(region_name.clone(), latency);
@@ -1870,7 +2108,9 @@ fn start_ping_timer(app_state: Rc<AppState>) {
                         let name = list_store.get::<String>(&iter, 0);
                         let clean_name = name.replace(" ⚠︎", "");
 
-                        if let Some(&latency) = latency_results.get(&clean_name) {
+                        if is_region_blocked_by_hosts(&clean_name, &regions, &blocked_regions, &blocked_hosts) {
+                            list_store.set(&iter, &[(1, &"disconnected".to_string()), (5, &"gray".to_string())]);
+                        } else if let Some(&latency) = latency_results.get(&clean_name) {
                             let latency_text = if latency >= 0 {
                                 format!("{} ms", latency)
                             } else {
@@ -1890,4 +2130,35 @@ fn start_ping_timer(app_state: Rc<AppState>) {
 
         glib::ControlFlow::Continue
     });
+}
+
+fn is_region_blocked_by_hosts(
+    region_key: &str,
+    regions: &HashMap<String, RegionInfo>,
+    blocked_regions: &HashMap<String, RegionInfo>,
+    blocked_hosts: &HashSet<String>,
+) -> bool {
+    if blocked_hosts.is_empty() {
+        return false;
+    }
+
+    if let Some(info) = regions.get(region_key) {
+        return info.hosts.iter().any(|h| blocked_hosts.contains(&h.to_lowercase()));
+    }
+
+    if let Some(info) = blocked_regions.get(region_key) {
+        return info.hosts.iter().any(|h| blocked_hosts.contains(&h.to_lowercase()));
+    }
+
+    false
+}
+
+fn format_update_tooltip(last_update: DateTime<Local>) -> String {
+    let seconds = (Local::now() - last_update).num_seconds().max(0);
+    let time = last_update.format("%-I:%M%p").to_string();
+    let time = time.replace("AM", "ᴀᴍ").replace("PM", "ᴘᴍ");
+    format!(
+        "Most recent connection: {}s ago, at {}\n\nThis is the region that Dead by Daylight chose\nwhen connecting you to their game.",
+        seconds, time
+    )
 }
