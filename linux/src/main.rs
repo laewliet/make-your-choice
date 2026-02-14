@@ -502,7 +502,7 @@ fn build_ui(app: &Application) {
     connected_box.set_margin_top(8);
     
     let connection_dot = Label::builder()
-        .label("◉")
+        .label("⬤")
         .css_classes(["connection-dot", "waiting"])
         .build();
     // Default waiting color (match Windows)
