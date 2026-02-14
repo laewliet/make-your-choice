@@ -12,9 +12,9 @@ use gtk4::prelude::*;
 use gtk4::{
     gio, glib, pango, Application, ApplicationWindow, Box as GtkBox, Button, ButtonsType,
     CellRendererText, CheckButton, ComboBoxText, Dialog, Entry, FileChooserAction,
-    FileChooserNative, FileFilter, Label, ListStore, MenuButton, MessageDialog, MessageType,
-    Orientation, PolicyType, ResponseType, ScrolledWindow, SelectionMode, Separator, TreeView,
-    TreeViewColumn,
+    FileChooserNative, FileFilter, Image, Label, ListStore, MenuButton, MessageDialog,
+    MessageType, Orientation, PolicyType, ResponseType, ScrolledWindow, SelectionMode, Separator,
+    TreeView, TreeViewColumn,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -39,7 +39,7 @@ struct PatchNotes {
 }
 
 fn load_versinf() -> (String, String) {
-    const VERSINF_YAML: &str = include_str!("../../VERSINF.yaml");
+    const VERSINF_YAML: &str = include_str!("../../VERSINF.yml");
 
     match serde_yaml::from_str::<PatchNotes>(VERSINF_YAML) {
         Ok(versinf) => {
@@ -88,18 +88,18 @@ struct AppState {
 
 fn get_color_for_latency(ms: i64) -> &'static str {
     if ms < 0 {
-        return "gray";
+        return "#778899";
     }
     if ms < 80 {
-        return "green";
+        return "#008000";
     }
     if ms < 130 {
-        return "orange";
+        return "#ffa500";
     }
     if ms < 250 {
-        return "crimson";
+        return "#dc143c";
     }
-    "purple"
+    "#c71585"
 }
 
 fn refresh_warning_symbols(
@@ -502,11 +502,11 @@ fn build_ui(app: &Application) {
     connected_box.set_margin_top(8);
     
     let connection_dot = Label::builder()
-        .label("◉")
+        .label("⬤")
         .css_classes(["connection-dot", "waiting"])
         .build();
-    // Default blue waiting color
-    const CSS_DOT: &str = "label.connection-dot { color: #3498db; font-weight: bold; }";
+    // Default waiting color (match Windows)
+    const CSS_DOT: &str = "label.connection-dot { color: #778899; font-weight: bold; }";
     let provider = gtk4::CssProvider::new();
     provider.load_from_data(CSS_DOT);
     gtk4::style_context_add_provider_for_display(
@@ -529,6 +529,16 @@ fn build_ui(app: &Application) {
     const CSS_STYLES: &str = "
         label.bold-label { font-weight: bold; }
         label.italic-label { font-style: italic; }
+        button.kofi-button {
+            background-color: #ff5e5b;
+            color: #ffffff;
+        }
+        button.kofi-button:hover {
+            background-color: #ff726f;
+        }
+        button.kofi-button:active {
+            background-color: #e8514e;
+        }
     ";
     let style_provider = gtk4::CssProvider::new();
     style_provider.load_from_data(CSS_STYLES);
@@ -570,6 +580,7 @@ fn build_ui(app: &Application) {
     let aws_service = Arc::new(AwsIpService::new());
 
     let (region_tx, region_rx) = std::sync::mpsc::channel::<(String, Option<String>)>();
+    let last_seen = Arc::new(Mutex::new(None::<(String, Option<String>)>));
     {
         let connected_label = connected_value.clone();
         let connection_dot = connection_dot.clone();
@@ -578,6 +589,7 @@ fn build_ui(app: &Application) {
         let hosts_manager = hosts_manager.clone();
         let last_update = Rc::new(RefCell::new(None::<DateTime<Local>>));
         let last_update_clone = last_update.clone();
+        let last_seen_for_ui = last_seen.clone();
 
         glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
             let blocked_hosts = hosts_manager.get_blocked_hostnames();
@@ -592,7 +604,7 @@ fn build_ui(app: &Application) {
                 connected_label.set_text(&text);
 
                 // Determine dot color
-                let mut color_class = "waiting"; // Blue (default)
+                let mut color_class = "waiting"; // Gray (default)
 
                 if is_known {
                     if let Some(key) = region_key_opt {
@@ -633,6 +645,9 @@ fn build_ui(app: &Application) {
                     let _ = connection_dot.remove_css_class("blocked");
                     let _ = connection_dot.remove_css_class("unknown");
                     connection_dot.add_css_class("waiting");
+                    if let Ok(mut last) = last_seen_for_ui.lock() {
+                        *last = None;
+                    }
                 }
                 format_update_tooltip(ts)
             } else {
@@ -641,6 +656,9 @@ fn build_ui(app: &Application) {
                 let _ = connection_dot.remove_css_class("blocked");
                 let _ = connection_dot.remove_css_class("unknown");
                 connection_dot.add_css_class("waiting");
+                if let Ok(mut last) = last_seen_for_ui.lock() {
+                    *last = None;
+                }
                 "Most recent connection: —\n\nThis is the region that Dead by Daylight chose\nwhen connecting you to their game.".to_string()
             };
             connected_label.set_tooltip_text(Some(&tooltip));
@@ -653,7 +671,6 @@ fn build_ui(app: &Application) {
     let aws_service_clone = aws_service.clone();
     let runtime_clone = tokio_runtime.clone();
     let region_tx_clone = region_tx.clone();
-    let last_seen = Arc::new(Mutex::new(None::<(String, Option<String>)>));
     let last_seen_clone = last_seen.clone();
 
     let sniffer = Arc::new(TrafficSniffer::new(move |remote_ip, _port| {
@@ -680,12 +697,12 @@ fn build_ui(app: &Application) {
         });
     }));
     
-    // Add Dot Color Styles
+    // Add Dot Color Styles (match Windows)
     const DOT_COLORS: &str = "
-        label.waiting { color: #3498db; }
-        label.allowed { color: #2ecc71; }
-        label.blocked { color: #e74c3c; }
-        label.unknown { color: #f39c12; }
+        label.waiting { color: #778899; }
+        label.allowed { color: #008000; }
+        label.blocked { color: #ff0000; }
+        label.unknown { color: #ffa500; }
     ";
     let dot_provider = gtk4::CssProvider::new();
     dot_provider.load_from_data(DOT_COLORS);
@@ -713,11 +730,17 @@ fn build_ui(app: &Application) {
     });
 
     // Create menu bar
-    let menu_box = GtkBox::new(Orientation::Horizontal, 5);
-    menu_box.set_margin_start(5);
-    menu_box.set_margin_end(5);
-    menu_box.set_margin_top(5);
-    menu_box.set_margin_bottom(5);
+    let menu_bar = GtkBox::new(Orientation::Horizontal, 5);
+    menu_bar.set_margin_start(5);
+    menu_bar.set_margin_end(5);
+    menu_bar.set_margin_top(5);
+    menu_bar.set_margin_bottom(5);
+    menu_bar.set_hexpand(true);
+
+    let menu_left = GtkBox::new(Orientation::Horizontal, 5);
+    let menu_right = GtkBox::new(Orientation::Horizontal, 5);
+    menu_right.set_halign(gtk4::Align::End);
+    menu_right.set_hexpand(true);
 
     // Version menu button
     let version_menu = create_version_menu(&window, &app_state);
@@ -743,13 +766,44 @@ fn build_ui(app: &Application) {
     // Set up menu actions
     setup_menu_actions(app, &window, &app_state);
 
-    menu_box.append(&version_btn);
-    menu_box.append(&options_btn);
-    menu_box.append(&help_btn);
+    menu_left.append(&version_btn);
+    menu_left.append(&options_btn);
+    menu_left.append(&help_btn);
+
+    const KOFI_SVG: &[u8] = include_bytes!("../../shared/kofi.svg");
+    let kofi_icon = {
+        let loader = gtk4::gdk_pixbuf::PixbufLoader::new();
+        let _ = loader.write(KOFI_SVG);
+        let _ = loader.close();
+        loader.pixbuf().map(|pixbuf| {
+            let texture = gtk4::gdk::Texture::for_pixbuf(&pixbuf);
+            let image = Image::from_paintable(Some(&texture));
+            image.set_pixel_size(16);
+            image
+        })
+    };
+
+    let kofi_label = Label::new(Some("Support on Ko-fi"));
+    let kofi_content = GtkBox::new(Orientation::Horizontal, 6);
+    if let Some(icon) = kofi_icon {
+        kofi_content.append(&icon);
+    }
+    kofi_content.append(&kofi_label);
+
+    let kofi_button = Button::new();
+    kofi_button.add_css_class("kofi-button");
+    kofi_button.set_child(Some(&kofi_content));
+    kofi_button.connect_clicked(|_| {
+        open_url("https://ko-fi.com/kylo");
+    });
+    menu_right.append(&kofi_button);
+
+    menu_bar.append(&menu_left);
+    menu_bar.append(&menu_right);
 
     // Main layout
     let main_box = GtkBox::new(Orientation::Vertical, 0);
-    main_box.append(&menu_box);
+    main_box.append(&menu_bar);
     main_box.append(&Separator::new(Orientation::Horizontal));
     main_box.append(&connected_box);
     main_box.append(&tip_label);

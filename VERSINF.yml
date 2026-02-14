@@ -1,0 +1,6 @@
+version: v2.7
+notes:
+  - Fixed an exception that could occur when the user's input method used a non-default layout on Windows.
+  - Fixed a restart crash in settings caused by trimming on Windows.
+  - More dark mode improvements for Windows.
+  - UI enhancements.
