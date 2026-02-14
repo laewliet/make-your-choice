@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Net.NetworkInformation;
 using System.Net;
@@ -74,7 +75,7 @@ namespace MakeYourChoice
             try
             {
                 var assembly = Assembly.GetExecutingAssembly();
-                var resourceName = "MakeYourChoice.VERSINF.yaml";
+                var resourceName = "MakeYourChoice.VERSINF.yml";
 
                 using (var stream = assembly.GetManifestResourceStream(resourceName))
                 {
@@ -271,6 +272,133 @@ namespace MakeYourChoice
             public override Color ImageMarginGradientEnd => Color.FromArgb(32, 32, 32);
         }
 
+        private class TransparentMenuColorTable : ProfessionalColorTable
+        {
+            public override Color ToolStripGradientBegin => Color.Transparent;
+            public override Color ToolStripGradientMiddle => Color.Transparent;
+            public override Color ToolStripGradientEnd => Color.Transparent;
+        }
+
+        private class FlatMenuRenderer : ToolStripProfessionalRenderer
+        {
+            private static readonly Color KofiBase = ColorTranslator.FromHtml("#ff5e5b");
+            private static readonly Color KofiHover = ColorTranslator.FromHtml("#ff726f");
+            private static readonly Color KofiPressed = ColorTranslator.FromHtml("#e8514e");
+            private static readonly Color KofiStroke = ColorTranslator.FromHtml("#e24b49");
+            private const int KofiIconTextGap = 6;
+            private const int KofiCornerRadius = 4;
+
+            public FlatMenuRenderer() : base(new TransparentMenuColorTable())
+            {
+            }
+
+            protected override void OnRenderButtonBackground(ToolStripItemRenderEventArgs e)
+            {
+                if (e.Item is ToolStripButton button && button.Name == "kofiButton")
+                {
+                    var color = KofiBase;
+                    if (button.Pressed)
+                    {
+                        color = KofiPressed;
+                    }
+                    else if (button.Selected)
+                    {
+                        color = KofiHover;
+                    }
+
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    var rect = new Rectangle(0, 0, e.Item.Bounds.Width - 1, e.Item.Bounds.Height - 1);
+                    using var path = CreateRoundedRect(rect, KofiCornerRadius);
+                    using var brush = new SolidBrush(color);
+                    using var pen = new Pen(KofiStroke);
+                    e.Graphics.FillPath(brush, path);
+                    e.Graphics.DrawPath(pen, path);
+                    return;
+                }
+
+                base.OnRenderButtonBackground(e);
+            }
+
+            private static GraphicsPath CreateRoundedRect(Rectangle rect, int radius)
+            {
+                var path = new GraphicsPath();
+                if (radius <= 0)
+                {
+                    path.AddRectangle(rect);
+                    return path;
+                }
+
+                var diameter = radius * 2;
+                var arc = new Rectangle(rect.Location, new Size(diameter, diameter));
+                path.AddArc(arc, 180, 90);
+                arc.X = rect.Right - diameter;
+                path.AddArc(arc, 270, 90);
+                arc.Y = rect.Bottom - diameter;
+                path.AddArc(arc, 0, 90);
+                arc.X = rect.Left;
+                path.AddArc(arc, 90, 90);
+                path.CloseFigure();
+                return path;
+            }
+
+            protected override void OnRenderItemImage(ToolStripItemImageRenderEventArgs e)
+            {
+                if (e.Item is ToolStripButton button && button.Name == "kofiButton")
+                {
+                    return;
+                }
+
+                base.OnRenderItemImage(e);
+            }
+
+            protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+            {
+                if (e.Item is ToolStripButton button && button.Name == "kofiButton")
+                {
+                    var bounds = e.Item.ContentRectangle;
+                    var image = button.Image;
+                    var text = button.Text ?? string.Empty;
+                    var font = button.Font;
+
+                    var textSize = TextRenderer.MeasureText(
+                        e.Graphics,
+                        text,
+                        font,
+                        Size.Empty,
+                        TextFormatFlags.NoPadding | TextFormatFlags.SingleLine
+                    );
+
+                    var imageWidth = image?.Width ?? 0;
+                    var imageHeight = image?.Height ?? 0;
+                    var gap = image != null ? KofiIconTextGap : 0;
+                    var totalWidth = imageWidth + gap + textSize.Width;
+                    var contentX = bounds.Left + (bounds.Width - totalWidth) / 2;
+                    var centerY = bounds.Top + bounds.Height / 2;
+
+                    if (image != null)
+                    {
+                        var imageY = centerY - (imageHeight / 2);
+                        e.Graphics.DrawImage(image, contentX, imageY, imageWidth, imageHeight);
+                        contentX += imageWidth + gap;
+                    }
+
+                    var textY = centerY - (textSize.Height / 2);
+                    var textRect = new Rectangle(contentX, textY, textSize.Width, textSize.Height);
+                    TextRenderer.DrawText(
+                        e.Graphics,
+                        text,
+                        font,
+                        textRect,
+                        e.TextColor,
+                        TextFormatFlags.NoPadding | TextFormatFlags.SingleLine
+                    );
+                    return;
+                }
+
+                base.OnRenderItemText(e);
+            }
+        }
+
         private void ApplyTheme()
         {
             // Force preferred app mode (2 = Dark, 3 = Light) to ignore system settings if needed
@@ -281,6 +409,12 @@ namespace MakeYourChoice
             SendMessage(this.Handle, 0x0085, IntPtr.Zero, IntPtr.Zero); // WM_NCPAINT
             
             ApplyDarkThemeRefinements(this);
+            if (_lv != null)
+            {
+                _lv.BackColor = _darkMode ? Color.FromArgb(32, 32, 32) : SystemColors.Window;
+                _lv.ForeColor = _darkMode ? Color.Gainsboro : SystemColors.WindowText;
+                _lv.Invalidate();
+            }
             Refresh();
         }
 
@@ -400,9 +534,9 @@ namespace MakeYourChoice
                     if (string.IsNullOrEmpty(regionName))
                     {
                         if (text.Contains("Waiting"))
-                            dotColor = Color.DodgerBlue; // Waiting
+                            dotColor = Color.LightSlateGray; // Waiting
                         else
-                            dotColor = Color.DarkGoldenrod; // Unknown region Warning
+                            dotColor = Color.Orange; // Unknown region Warning
                     }
                     else
                     {
@@ -458,7 +592,11 @@ namespace MakeYourChoice
             MaximumSize     = new Size(Width, Screen.PrimaryScreen.WorkingArea.Height);
 
             // ── MenuStrip ────────────────────────────────────────────────
-            _menuStrip = new MenuStrip();
+            _menuStrip = new MenuStrip
+            {
+                BackColor = Color.Transparent,
+                Renderer = new FlatMenuRenderer()
+            };
 
             var mSource = new ToolStripMenuItem(CurrentVersion);
 
@@ -471,6 +609,18 @@ namespace MakeYourChoice
                 {
                     var svgDocument = Svg.SvgDocument.Open(starSvgPath);
                     starIcon = svgDocument.Draw(16, 16);
+                }
+            }
+            catch { /* ignore */ }
+
+            Bitmap kofiIcon = null;
+            try
+            {
+                var kofiSvgPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "kofi.svg");
+                if (File.Exists(kofiSvgPath))
+                {
+                    var svgDocument = Svg.SvgDocument.Open(kofiSvgPath);
+                    kofiIcon = svgDocument.Draw(16, 16);
                 }
             }
             catch { /* ignore */ }
@@ -549,6 +699,27 @@ namespace MakeYourChoice
             _menuStrip.Items.Add(mOptions);
             _menuStrip.Items.Add(mHelp);
 
+            var kofiButton = new ToolStripButton
+            {
+                Name = "kofiButton",
+                Text = "Support on Ko-fi",
+                AutoSize = true,
+                BackColor = ColorTranslator.FromHtml("#ff5e5b"),
+                ForeColor = Color.White,
+                Alignment = ToolStripItemAlignment.Right,
+                Margin = new Padding(6, 2, 6, 2),
+                Padding = new Padding(10, 3, 10, 3)
+            };
+            if (kofiIcon != null)
+            {
+                kofiButton.Image = kofiIcon;
+                kofiButton.ImageAlign = ContentAlignment.MiddleLeft;
+                kofiButton.TextImageRelation = TextImageRelation.ImageBeforeText;
+                kofiButton.ImageScaling = ToolStripItemImageScaling.None;
+            }
+            kofiButton.Click += (_, __) => OpenUrl("https://ko-fi.com/kylo");
+            _menuStrip.Items.Add(kofiButton);
+
             // ── Connected To Panel ──────────────────────────────────────
             var flpConnection = new FlowLayoutPanel
             {
@@ -561,12 +732,12 @@ namespace MakeYourChoice
 
             _lblConnectionDot = new Label
             {
-                Text        = "◉",
+                Text        = "⬤",
                 AutoSize    = true,
                 Font        = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
                 Margin      = new Padding(0, 0, 5, 0), // Right margin to separate from text
                 TextAlign   = ContentAlignment.MiddleCenter,
-                ForeColor   = _darkMode ? Color.SkyBlue : Color.DodgerBlue // Default waiting color
+                ForeColor   = Color.LightSlateGray // Default waiting color
             };
 
             var lblConnectedToTitle = new Label
@@ -619,8 +790,13 @@ namespace MakeYourChoice
             _lv.OwnerDraw = true;
             _lv.DrawColumnHeader += (_, e) =>
             {
+                e.DrawDefault = false;
                 using var bg = new SolidBrush(_lv.BackColor);
-                e.Graphics.FillRectangle(bg, e.Bounds);
+                if (e.ColumnIndex == 0)
+                {
+                    var headerRect = new Rectangle(0, e.Bounds.Top, _lv.ClientSize.Width, e.Bounds.Height);
+                    e.Graphics.FillRectangle(bg, headerRect);
+                }
                 TextRenderer.DrawText(
                     e.Graphics,
                     e.Header.Text,
@@ -702,7 +878,7 @@ namespace MakeYourChoice
                     Tag = null,
                     Checked = false,
                     UseItemStyleForSubItems = false,
-                    ForeColor = Color.DodgerBlue,
+                    ForeColor = Color.LightSlateGray, // Color for the region groups
                     Font = new Font(_lv.Font, FontStyle.Bold)
                 };
                 divider.SubItems.Add(string.Empty);
@@ -738,29 +914,40 @@ namespace MakeYourChoice
                 FlowDirection = FlowDirection.RightToLeft,
                 Dock          = DockStyle.Bottom,
                 Padding       = new Padding(5),
-                AutoSize      = true
+                AutoSize = true,
+                WrapContents = false
             };
             _buttonPanel.Controls.Add(_btnApply);
             _buttonPanel.Controls.Add(_btnRevert);
 
             // ── Layout ──────────────────────────────────────────────────
+            var menuDivider = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 1,
+                BackColor = _darkMode ? Color.FromArgb(60, 60, 60) : Color.Gainsboro,
+                Margin = new Padding(0, 0, 0, 6)
+            };
+
             var tlp = new TableLayoutPanel
             {
                 Dock        = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount    = 5
+                RowCount    = 6
             };
             tlp.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // menu
+            tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // divider
             tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // connected info
             tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // tip
             tlp.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // buttons
 
             tlp.Controls.Add(_lv,          0, 0);
             tlp.Controls.Add(_menuStrip,   0, 1);
-            tlp.Controls.Add(flpConnection, 0, 2);
-            tlp.Controls.Add(_lblTip,      0, 3);
-            tlp.Controls.Add(_buttonPanel, 0, 4);
+            tlp.Controls.Add(menuDivider,  0, 2);
+            tlp.Controls.Add(flpConnection, 0, 3);
+            tlp.Controls.Add(_lblTip,      0, 4);
+            tlp.Controls.Add(_buttonPanel, 0, 5);
 
             Controls.Add(tlp);
         }
@@ -779,7 +966,7 @@ namespace MakeYourChoice
                 if (seconds >= 5)
                 {
                     _lblConnectedToValue.Text = "Waiting for match…";
-                    _lblConnectionDot.ForeColor = _darkMode ? Color.SkyBlue : Color.DodgerBlue;
+                    _lblConnectionDot.ForeColor = Color.LightSlateGray;
                 }
             }
             else
@@ -1207,11 +1394,11 @@ namespace MakeYourChoice
 
         private Color GetColorForLatency(long ms)
         {
-            if (ms < 0)   return Color.Gray;
+            if (ms < 0)   return Color.LightSlateGray;
             if (ms < 80)  return Color.Green;
             if (ms < 130) return Color.Orange;
             if (ms < 250) return Color.Crimson;
-            return Color.Purple;
+            return Color.MediumVioletRed;
         }
 
         private string GetGroupName(string region)
@@ -2312,7 +2499,7 @@ namespace MakeYourChoice
             {
                 if (!(item.Tag is string regionKey))
                 {
-                    item.ForeColor = Color.DodgerBlue;
+                    item.ForeColor = Color.LightSlateGray; // Color for the region groups
                     item.Font = new Font(_lv.Font, FontStyle.Bold);
                     item.ToolTipText = string.Empty;
                     continue;
